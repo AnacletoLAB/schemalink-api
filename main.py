@@ -112,3 +112,23 @@ async def generate(request: Request):
         messages = client.beta.threads.messages.list(thread_id=run.thread_id)
 
     return Response(content=messages.data[0].content[0].text.value)
+
+
+@app.post("/api/openai/ask/")
+async def ask(request: Request):
+    if not (OPENAI_API_KEY):
+        return Response(status_code=500, content="OpenAI API key not set")
+
+    raw_body = await request.body()
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "user",
+                "content": raw_body.decode("utf-8"),
+            },
+        ],
+    )
+
+    return Response(content=completion.choices[0].message.content)
