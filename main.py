@@ -127,14 +127,14 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200"],
+    allow_origins=["schemalink.anacleto.di.unimi.it"],
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
 
 # Register a User
-@app.post("/auth/register/")
+@app.post("/api/auth/register/")
 async def register_user(user: UserBase, db: db_dependency):
     existing_user = db.query(models.User).filter(models.User.username == user.username).first()
     
@@ -201,7 +201,7 @@ async def register_user(user: UserBase, db: db_dependency):
     }
 
 # Login a User and return JWT Token
-@app.post("/auth/login/")
+@app.post("/api/auth/login/")
 async def login_user(user: UserLogin, db: db_dependency):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     if not db_user:
@@ -258,14 +258,14 @@ async def login_user(user: UserLogin, db: db_dependency):
     return response   
 
 # Logout a User
-@app.post("/auth/logout/")
+@app.post("/api/auth/logout/")
 async def logout_user():
     response = JSONResponse(content={"message": "Logged out"})
     response.delete_cookie("access_token")
     return response
 
 # Delete user account
-@app.post("/auth/delete-account/")
+@app.post("/api/auth/delete-account/")
 async def delete_account(db: db_dependency, current_user: str = Depends(get_current_user)):
     db_user = db.query(models.User).filter(models.User.username == current_user).first()
     
@@ -286,14 +286,14 @@ async def delete_account(db: db_dependency, current_user: str = Depends(get_curr
     return JSONResponse(content={"message": "Account successfully deleted."})
 
 # Get all users
-@app.post("/get-users/", response_model=List[UserResponse])
+@app.post("/api/get-users/", response_model=List[UserResponse])
 async def get_users(db: db_dependency):
     db_users = db.query(models.User).all()
 
     return db_users
 
 # Update user status
-@app.post("/update-status/")
+@app.post("/api/update-status/")
 async def update_user_status( status_update: UpdateUserStatusRequest, db: db_dependency):
     user = db.query(models.User).filter(models.User.username == status_update.username).first()
 
@@ -332,14 +332,14 @@ async def update_user_status( status_update: UpdateUserStatusRequest, db: db_dep
     }
 
 # Get all user subscriptions to policies
-@app.post("/get-user-subscriptions/", response_model=List[UserSubscribesPolicyBase])
+@app.post("/api/get-user-subscriptions/", response_model=List[UserSubscribesPolicyBase])
 async def get_user_subscriptions(db: db_dependency):
     db_subscriptions = db.query(models.UserSubscribesPolicy).all()
 
     return db_subscriptions
 
 # Update user policy status
-@app.post("/update-subscription-status/")
+@app.post("/api/update-subscription-status/")
 async def update_subscription_status( status_subscription_update: UpdateUserStatusRequest, db: db_dependency):
     policySubscription = db.query(models.UserSubscribesPolicy).filter(
         models.UserSubscribesPolicy.username == status_subscription_update.username,
@@ -418,7 +418,7 @@ async def update_subscription_status( status_subscription_update: UpdateUserStat
 
 
 # User is authorized to perform operation
-@app.post("/canPerformOperation/")
+@app.post("/api/canPerformOperation/")
 async def check_user_operation(request_data: OperationRequest, db: db_dependency):
     username = request_data.username
     operation = request_data.operation
@@ -552,7 +552,7 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
         return JSONResponse(status_code=500, content={"message": "Internal server error"})
 
 # User subscribes to a policy
-@app.post("/subscribe-policy/")
+@app.post("/api/subscribe-policy/")
 async def subscribe_policy( data: UserSubscribesPolicyRequest, db: db_dependency):
     user = db.query(models.User).filter(models.User.username == data.username).first()
     if not user:
@@ -639,7 +639,7 @@ async def subscribe_policy( data: UserSubscribesPolicyRequest, db: db_dependency
     }
 
 # Get user subscription details
-@app.post("/get-user-subscription-details/")
+@app.post("/api/get-user-subscription-details/")
 async def get_user_subscription_details(request: UsernameRequest, db: db_dependency):
     username = request.username 
     
@@ -683,7 +683,7 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
     }
 
 # Get user subscription active or pending
-@app.post("/get-user-subscription/")
+@app.post("/api/get-user-subscription/")
 async def get_user_subscription(request: UsernameRequest, db: db_dependency):
     username = request.username 
     
@@ -768,7 +768,7 @@ async def update_user(user_update: UserUpdateRequest, db: Session = Depends(get_
     }
 
 # Contribute on AI store
-@app.post("/contribute/")
+@app.post("/api/contribute/")
 async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
     username = request.username
     user = db.query(models.User).filter(models.User.username == username).first()
