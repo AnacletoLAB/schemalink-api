@@ -9,7 +9,7 @@ import logging
 
 local_tz = pytz.timezone("Europe/Rome")
 
-load_dotenv()
+load_dotenv(override=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -25,8 +25,8 @@ async def handle_notify(connection, pid, channel_name, payload):
                 "Great news! Your SchemaLink account has been approved.\n\n"
                 "You have been granted a Trial policy that allows up to 10 intelligent requests "
                 "within the next 24 hours. After this period, your access may be limited unless you upgrade "
-                "to a higher tier.\n\n"
-                "Thank you for joining SchemaLink, and we hope you enjoy using the platform!\n\n"
+                "your policy to an upper tier.\n\n"
+                "Thank you for joining SchemaLink!\n\n"
                 f"Best regards,\n"
                 f"The SchemaLink Team"
             )

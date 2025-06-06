@@ -33,7 +33,7 @@ from expire_subscriptions_job import expire_subscriptions_job
 
 local_tz = pytz.timezone("Europe/Rome")
 
-load_dotenv()
+load_dotenv(override=True)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_THREAD_ID = os.getenv("OPENAI_THREAD_ID")
@@ -127,7 +127,7 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["schemalink.anacleto.di.unimi.it"],
+    allow_origins=["schemalink.anacleto.di.unimi.it", "http://localhost:8000","http://localhost:4200",],
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
@@ -343,7 +343,7 @@ async def get_user_subscriptions(db: db_dependency):
 async def update_subscription_status( status_subscription_update: UpdateUserStatusRequest, db: db_dependency):
     policySubscription = db.query(models.UserSubscribesPolicy).filter(
         models.UserSubscribesPolicy.username == status_subscription_update.username,
-        models.UserSubscribesPolicy.status == "pending"  # Filtro aggiunto
+        models.UserSubscribesPolicy.status == "pending" 
     ).first()
 
 
@@ -423,12 +423,12 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
     username = request_data.username
     operation = request_data.operation
 
-    print("Username ricevuto:", username)
-    print("Operation ricevuta:", operation)
+    print("Username received:", username)
+    print("Operation received:", operation)
 
     # Username null
     if not username:
-        return JSONResponse(content={"allowed": False, "reason": "You must be logged in to performs operation."})
+        return JSONResponse(content={"allowed": False, "reason": "You must be logged in to perform intelligent requests."})
     
     # Admin user
     if username == "schemalink":
@@ -474,7 +474,7 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
     ).scalar()
 
     if user_ops_count >= max_access:
-        return JSONResponse(content={"allowed": False, "reason": "You reached the maximum number of allowed operations for your policy."}) 
+        return JSONResponse(content={"allowed": False, "reason": "You reached the maximum number of intelligent requests for your policy."}) 
 
     return JSONResponse(content={"allowed": True, "policy": policy_name})
 
@@ -519,9 +519,9 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
                             subject = f"You have {policy.threshold} operations remaining on your '{policy.name}' plan"
                             body = (
                                 f"Hi {user.username},\n\n"
-                                f"You have {policy.threshold} operations remaining"
+                                f"You have {policy.threshold} intelligent requests remaining"
                                 f"under your current '{policy.name}' subscription plan.\n\n"
-                                f"Once you reach the limit of {policy.maxAccess} operations, your subscription will expire "
+                                f"Once you reach the limit of {policy.maxAccess} intelligent requests, your subscription will expire "
                                 f"and you will no longer be able to use intelligent requests.\n\n"
                                 f"To continue uninterrupted, consider upgrading or renewing your plan.\n\n"
                                 f"Thank you for using SchemaLink!\n"
@@ -786,18 +786,18 @@ async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
     subject = "New contribution received"
     body =  (
         f"The gold/platinum user {user.username} ({user.email}) "
-        f"proposes the schema '{request.diagramName}' to the AI store. "
-        f"See attached file for the graph."
+        f"proposes the schema '{request.diagramName}' to be included into the AI store. "
+        f"See attached file for the SchemaLink JSON internal representation."
         f"\n\nSchemaLink Notification System"
     )
     to_email = "schemalinkanacleto@gmail.com"
     
     send_email(to_email=to_email, subject=subject, message=body, attachment=temp_file_path)
 
-    subject = "Thanks for your contribution to AI store"
+    subject = "Thanks for contributing to the AI store"
     body = (
         f"Hi {user.username},\n\n"
-        f"Thank you for your contribution to the AI store! "
+        f"Thank you for contributing to the AI store! "
         f"Your schema '{request.diagramName}' has been received and is under review.\n"
         f"\nBest regards,\n"
         f"The SchemaLink Team"

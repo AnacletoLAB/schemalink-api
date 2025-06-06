@@ -7,7 +7,7 @@ import os
 
 current_window = None
 
-load_dotenv() 
+load_dotenv(override=True) 
 
 EMAIL_ADDRESS = 'schemalinkanacleto@gmail.com'
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")

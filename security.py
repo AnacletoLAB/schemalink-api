@@ -9,14 +9,14 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Secret key for JWT
 SECRET_KEY = os.getenv("SECRET_KEY") # The secret key used to sign JWT tokens.
 ALGORITHM = "HS256" # Hashing algorithm for JWT
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Cbcrypt algoritmo configuration per l'hashing delle password.
+# Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
