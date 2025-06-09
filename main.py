@@ -457,6 +457,9 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
     start_date = policy_subscription[0]
     policy_name = policy_subscription[1]
 
+    if policy_name == "platinum":
+        return JSONResponse(content={"allowed": True, "policy": policy_name})
+
     # Policy max access
     max_access = db.execute(
         text("SELECT maxAccess FROM Policy WHERE name = :name"),
@@ -503,6 +506,8 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
 
             if subscription:
                 policy = db.query(models.Policy).filter_by(name=subscription.policyName).first()
+                
+                print("Loaded policy:", policy.name, policy.maxAccess, policy.threshold)
                 if policy:
                     op_count = db.query(models.UserMadeOperation).filter(
                         models.UserMadeOperation.username == operation.username,
@@ -512,28 +517,30 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
 
                     threshold_reached = False
 
-                    if op_count == (policy.maxAccess-policy.threshold):
-                        threshold_reached = True
-                        user = db.query(models.User).filter_by(username=operation.username).first()
-                        if user:
-                            subject = f"You have {policy.threshold} operations remaining on your '{policy.name}' plan"
-                            body = (
-                                f"Hi {user.username},\n\n"
-                                f"You have {policy.threshold} intelligent requests remaining"
-                                f"under your current '{policy.name}' subscription plan.\n\n"
-                                f"Once you reach the limit of {policy.maxAccess} intelligent requests, your subscription will expire "
-                                f"and you will no longer be able to use intelligent requests.\n\n"
-                                f"To continue uninterrupted, consider upgrading or renewing your plan.\n\n"
-                                f"Thank you for using SchemaLink!\n"
-                                f"\nBest regards,\n"
-                                f"The SchemaLink Team"
-                            )
-                            send_email(to_email=user.email, subject=subject, message=body)
+                    if (policy.name != "platinum"):
+                        threshold = policy.threshold if policy.threshold is not None else 0
+                        if op_count == (policy.maxAccess - threshold):
+                            threshold_reached = True
+                            user = db.query(models.User).filter_by(username=operation.username).first()
+                            if user:
+                                subject = f"You have {policy.threshold} operations remaining on your '{policy.name}' plan"
+                                body = (
+                                    f"Hi {user.username},\n\n"
+                                    f"You have {policy.threshold} intelligent requests remaining"
+                                    f"under your current '{policy.name}' subscription plan.\n\n"
+                                    f"Once you reach the limit of {policy.maxAccess} intelligent requests, your subscription will expire "
+                                    f"and you will no longer be able to use intelligent requests.\n\n"
+                                    f"To continue uninterrupted, consider upgrading or renewing your plan.\n\n"
+                                    f"Thank you for using SchemaLink!\n"
+                                    f"\nBest regards,\n"
+                                    f"The SchemaLink Team"
+                                )
+                                send_email(to_email=user.email, subject=subject, message=body)
 
-                    if op_count >= policy.maxAccess:
-                        subscription.status = 'expired'
-                        subscription.endDate = now
-                        db.commit()
+                        if op_count >= policy.maxAccess:
+                            subscription.status = 'expired'
+                            subscription.endDate = now
+                            db.commit()
 
         return {
             "message": "Operation logged successfully.",
