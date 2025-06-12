@@ -27,9 +27,9 @@ name VARCHAR(13) PRIMARY KEY CHECK (name IN ('add', 'fix', 'reification', 'expla
 
 CREATE TABLE UserSubscribesPolicy (
 username VARCHAR(50) REFERENCES Users(username) ON DELETE CASCADE,
-startDate TIMESTAMP,
-endDate TIMESTAMP,
-requestDate TIMESTAMP,
+startDate TIMESTAMPTZ,
+endDate TIMESTAMPTZ,
+requestDate TIMESTAMPTZ,
 status VARCHAR(8) NOT NULL CHECK (status IN ('pending', 'active', 'rejected', 'expired')),
 policyName VARCHAR(8) NOT NULL CHECK (policyName IN ('trial', 'silver', 'gold', 'platinum'))
 REFERENCES Policy(name) ON DELETE RESTRICT,
@@ -38,7 +38,7 @@ PRIMARY KEY (username, requestDate)
 
 CREATE TABLE UserMadeOperation (
 username VARCHAR(50) REFERENCES Users(username) ON DELETE CASCADE,
-date TIMESTAMP,
+date TIMESTAMPTZ,
 operationName VARCHAR(50) NOT NULL REFERENCES Operation(name) ON DELETE RESTRICT,
 PRIMARY KEY (username, date)
 );
@@ -136,6 +136,9 @@ VALUES
 ('platinum', 'openGPTDialog'),
 ('platinum', 'generate');
 
+INSERT INTO Users (username, email, password, firstName, lastName, birthDate, status)
+VALUES
+('schemalink', 'schemalinkanacleto@gmail.com', '$2b$12$bU5UsayNGPkyxIQLySwZq.jtAbyiFtscA7Wd.OSXaqj5pQauNFXBm', 'Schemalink', 'Anacleto', '2001-12-11', 'active');
 
 
 

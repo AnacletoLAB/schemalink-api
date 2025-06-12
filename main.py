@@ -8,7 +8,7 @@ from linkml.generators.pydanticgen import PydanticGenerator
 from linkml.linter.linter import Linter
 from linkml.linter.formatters import JsonFormatter
 from linkml_runtime.linkml_model.meta import SchemaDefinition
-from openai import OpenAI
+from openai import OpenAI, OpenAIError, APIError, RateLimitError
 from pydantic import BaseModel, Field
 from typing import List, Annotated
 from database import SessionLocal, engine
@@ -273,6 +273,20 @@ async def delete_account(db: db_dependency, current_user: str = Depends(get_curr
     db.commit()
     db.refresh(db_user)
 
+    subscriptions = db.query(models.UserSubscribesPolicy).filter(
+        models.UserSubscribesPolicy.username == db_user.username,
+        models.UserSubscribesPolicy.status.in_(["active", "pending"])
+    ).all()
+
+    for sub in subscriptions:
+        if sub.status == "active":
+            sub.status = "expired"
+            sub.endDate = datetime.now(local_tz)
+        elif sub.status == "pending":
+            sub.status = "expired"
+
+    db.commit()
+
     admin_email = "schemalinkanacleto@gmail.com"
     admin_subject = f"Account deletion notice: {db_user.username}"
     admin_body = (
@@ -428,7 +442,7 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
 
     # Username null
     if not username:
-        return JSONResponse(content={"allowed": False, "reason": "You must be logged in to perform intelligent requests."})
+        return JSONResponse(content={"allowed": False, "reason": "You must register to request intelligent operations."})
     
     # Admin user
     if username == "schemalink":
@@ -664,7 +678,9 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
     ).order_by(models.UserSubscribesPolicy.requestDate.desc()).first()
 
     if not subscription:
-        raise HTTPException(status_code=404, detail="No active subscription found")
+        return {
+            "hasSubscription": False
+        }
 
     policy = db.query(models.Policy).filter(models.Policy.name == subscription.policyName).first()
 
@@ -817,8 +833,6 @@ async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
 
     return JSONResponse(content={"message": "Contribution received successfully"}, status_code=200)
 
-
-
 # Start the listener during the app's startup in FastAPI and set up the scheduler
 @app.on_event("startup")
 async def startup_event():
@@ -913,16 +927,33 @@ async def generate(request: Request):
 
     raw_body = await request.body()
     client = OpenAI(api_key=OPENAI_API_KEY)
-    client.beta.threads.messages.create(
-        thread_id=OPENAI_THREAD_ID, role="user", content=raw_body.decode("utf-8"),
-    )
-    run = client.beta.threads.runs.create_and_poll(
-        thread_id=OPENAI_THREAD_ID, assistant_id=OPENAI_ASSISTANT_ID
-    )
-    if run.status == "completed":
-        messages = client.beta.threads.messages.list(thread_id=run.thread_id)
+    try:
+        client.beta.threads.messages.create(
+            thread_id=OPENAI_THREAD_ID, role="user", content=raw_body.decode("utf-8"),
+        )
+        run = client.beta.threads.runs.create_and_poll(
+            thread_id=OPENAI_THREAD_ID, assistant_id=OPENAI_ASSISTANT_ID
+        )
+        if run.status == "completed":
+            messages = client.beta.threads.messages.list(thread_id=run.thread_id)
 
-    return Response(content=messages.data[0].content[0].text.value.replace("```yaml\n", "").replace("```", ""))
+        return Response(content=messages.data[0].content[0].text.value.replace("```yaml\n", "").replace("```", ""))
+    
+    except RateLimitError as e:
+        subject = "SchemaLink Error: OpenAI rate or fund limit exceeded"
+        body = (
+            f"An OpenAI request failed due to a rate or funding limit being exceeded.\n\n"
+            f"\n\nSchemaLink Notification System")
+        to_email = "schemalinkanacleto@gmail.com"
+        send_email(to_email=to_email, subject=subject, message=body)
+
+        # include 'insufficient_quota'
+        return JSONResponse(status_code=429, content={"error": "Quota exceeded or rate limited", "details": str(e)})
+
+    except APIError as e:
+        return JSONResponse(status_code=500, content={"error": "OpenAI API error", "details": str(e)})
+    except OpenAIError as e:
+        return JSONResponse(status_code=500, content={"error": "OpenAI error", "details": str(e)})
 
 
 @app.post("/api/openai/ask/")
@@ -932,14 +963,31 @@ async def ask(request: Request):
 
     raw_body = await request.body()
     client = OpenAI(api_key=OPENAI_API_KEY)
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": raw_body.decode("utf-8"),
-            },
-        ],
-    )
+    try: 
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": raw_body.decode("utf-8"),
+                },
+            ],
+        )
+        response_text = completion.choices[0].message.content.replace("```yaml\n", "").replace("```", "")
+        return Response(content=response_text)
 
-    return Response(content=completion.choices[0].message.content.replace("```yaml\n", "").replace("```", ""))
+    except RateLimitError as e:
+        subject = "SchemaLink Error: OpenAI rate or fund limit exceeded"
+        body = (
+            f"An OpenAI request failed due to a rate or funding limit being exceeded.\n\n"
+            f"\n\nSchemaLink Notification System")
+        to_email = "schemalinkanacleto@gmail.com"
+        send_email(to_email=to_email, subject=subject, message=body)
+
+        # include 'insufficient_quota'
+        return JSONResponse(status_code=429, content={"error": "Quota exceeded or rate limited", "details": str(e)})
+
+    except APIError as e:
+        return JSONResponse(status_code=500, content={"error": "OpenAI API error", "details": str(e)})
+    except OpenAIError as e:
+        return JSONResponse(status_code=500, content={"error": "OpenAI error", "details": str(e)})

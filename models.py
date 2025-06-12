@@ -66,9 +66,9 @@ class UserSubscribesPolicy(Base):
     __tablename__ = "usersubscribespolicy"
     
     username = Column(String(50), ForeignKey("users.username", ondelete="CASCADE"), primary_key=True)
-    startDate = Column("startdate", DateTime)
-    endDate = Column("enddate", DateTime)
-    requestDate = Column("requestdate", DateTime, primary_key=True)
+    startDate = Column("startdate", DateTime(timezone=True))
+    endDate = Column("enddate", DateTime(timezone=True))
+    requestDate = Column("requestdate", DateTime(timezone=True), primary_key=True)
     status = Column(String(8), nullable=False)
     policyName = Column("policyname", String(8), ForeignKey("policy.name", ondelete="RESTRICT"), nullable=False)
     
@@ -84,7 +84,7 @@ class UserMadeOperation(Base):
     __tablename__ = "usermadeoperation"
     
     username = Column(String(50), ForeignKey("users.username", ondelete="CASCADE"), primary_key=True)
-    date = Column(DateTime, primary_key=True)
+    date = Column(DateTime(timezone=True), primary_key=True)
     operationName = Column("operationname", String(50), ForeignKey("operations.name", ondelete="RESTRICT"), nullable=False)
     
     user = relationship("User", back_populates="operations")
