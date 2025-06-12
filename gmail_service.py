@@ -9,7 +9,7 @@ current_window = None
 
 load_dotenv(override=True) 
 
-EMAIL_ADDRESS = 'schemalinkanacleto@gmail.com'
+EMAIL_ADDRESS = os.getenv("ADMIN_EMAIL")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587

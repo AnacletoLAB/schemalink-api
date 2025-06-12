@@ -138,7 +138,7 @@ VALUES
 
 INSERT INTO Users (username, email, password, firstName, lastName, birthDate, status)
 VALUES
-('schemalink', 'schemalinkanacleto@gmail.com', '$2b$12$bU5UsayNGPkyxIQLySwZq.jtAbyiFtscA7Wd.OSXaqj5pQauNFXBm', 'Schemalink', 'Anacleto', '2001-12-11', 'active');
+('schemalink', 'admin@admin.com', '$2b$12$yZYH7Zgep3TO5uG3kQTiZepShn/7LDi6k/fq4K7Wp0VQ1PtqaMFOi', 'Admin', 'Admin', '2000-01-01', 'active');
 
 
 
@@ -151,7 +151,7 @@ BEGIN
  IF OLD.status IS DISTINCT FROM NEW.status THEN
  to_email := NEW.email;
  user_name := NEW.username;
- PERFORM pg_notify('user_status', to_email || ',' || user_name || ',' || NEW.status::TEXT);
+ PERFORM pg_notify('user_status', to_email || ',' || user_name || ',' || NEW.status::TEXT || ',' || OLD.status::TEXT);
  END IF;
  RETURN NEW;
 END;
@@ -175,7 +175,7 @@ BEGIN
  IF OLD.status IS DISTINCT FROM NEW.status THEN
  SELECT email INTO to_email FROM Users WHERE username = NEW.username;
  user_name := NEW.username;
- PERFORM pg_notify('policy_status', to_email || ',' || user_name || ',' || NEW.status::TEXT);
+ PERFORM pg_notify('policy_status', to_email || ',' || user_name || ',' || NEW.status::TEXT || ',' || OLD.status::TEXT);
  END IF;
  RETURN NEW;
 END;

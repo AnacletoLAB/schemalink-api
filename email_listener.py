@@ -15,44 +15,53 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def handle_notify(connection, pid, channel_name, payload):
     # Handles notifications when they arrive on the user_approval channel
-    user_email, username, status = payload.split(",")
+    user_email, username, status, old_status = payload.split(",")
     
     if channel_name == "user_status":
-        if status == "active":
-            subject = "Welcome to SchemaLink! Your account has been approved"
-            message = (
-                f"Hi {username},\n\n"
-                "Great news! Your SchemaLink account has been approved.\n\n"
-                "You have been granted a Trial policy that allows up to 10 intelligent requests "
-                "within the next 24 hours. After this period, your access may be limited unless you upgrade "
-                "your policy to an upper tier.\n\n"
-                "Thank you for joining SchemaLink!\n\n"
-                f"Best regards,\n"
-                f"The SchemaLink Team"
-            )
-            now = datetime.now(local_tz)
-            end_date = now + timedelta(hours=24)
+        if status == "active": 
+            if old_status == "pending":
+                subject = "Welcome to SchemaLink! Your account has been approved"
+                message = (
+                    f"Hi {username},\n\n"
+                    "Great news! Your SchemaLink account has been approved.\n\n"
+                    "You have been granted a Trial policy that allows up to 10 intelligent requests "
+                    "within the next 24 hours. After this period, your access may be limited unless you upgrade "
+                    "your policy to an upper tier.\n\n"
+                    "Thank you for joining SchemaLink!\n\n"
+                    f"Best regards,\n"
+                    f"The SchemaLink Team"
+                )
+                now = datetime.now(local_tz)
+                end_date = now + timedelta(hours=24)
 
-            if now.time() <= time(12, 0):  # From 00:00:01 to 12:00:00
-                end_date = (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-            else:   # From 12:00:01 to 23:59:59
-                end_date = (now + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            try:
-                await connection.execute("""
-                    INSERT INTO UserSubscribesPolicy (
-                        username, startDate, endDate, requestDate, status, policyName
-                    ) VALUES ($1, $2, $3, $4, $5, $6)
-                """, username, now, end_date, now, 'active', 'trial')
+                if now.time() <= time(12, 0):  # From 00:00:01 to 12:00:00
+                    end_date = (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+                else:   # From 12:00:01 to 23:59:59
+                    end_date = (now + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                try:
+                    await connection.execute("""
+                        INSERT INTO UserSubscribesPolicy (
+                            username, startDate, endDate, requestDate, status, policyName
+                        ) VALUES ($1, $2, $3, $4, $5, $6)
+                    """, username, now, end_date, now, 'active', 'trial')
 
-                print(f"Assigned 'trial' policy to user {username}")
-            except Exception as e:
-                print(f"Error assigning policy to user {username}: {e}")
+                    print(f"Assigned 'trial' policy to user {username}")
+                except Exception as e:
+                    print(f"Error assigning policy to user {username}: {e}")
+            elif old_status == "blocked":
+                subject = "SchemaLink account unblocked"
+                message = (
+                    f"Hi {username},\n\n"
+                    "Your SchemaLink account has been unblocked. You can now access your account and continue using our services.\n\n"
+                    f"Best regards,\n"
+                    f"The SchemaLink Team"
+                )
         elif status == "blocked":
             subject = "SchemaLink account blocked"
             message = (
                 f"Hi {username},\n\n"
-                "Your SchemaLink account has been blocked. \n\n"
+                "Your SchemaLink account has been blocked.\n\n"
                 f"Best regards,\n"
                 f"The SchemaLink Team"
             )

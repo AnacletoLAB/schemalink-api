@@ -35,6 +35,8 @@ local_tz = pytz.timezone("Europe/Rome")
 
 load_dotenv(override=True)
 
+admin_email = os.getenv("ADMIN_EMAIL")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_THREAD_ID = os.getenv("OPENAI_THREAD_ID")
 OPENAI_ASSISTANT_ID = os.getenv("OPENAI_ASSISTANT_ID")
@@ -186,11 +188,10 @@ async def register_user(user: UserBase, db: db_dependency):
         f"Email: {user.email}"
         f"\n\nSchemaLink Notification System"
     )
-    to_email = "schemalinkanacleto@gmail.com"
 
     logging.info(f"Sending email to notify admin of new registration: {user.email}")
 
-    send_email(to_email=to_email, subject=subject, message=body)
+    send_email(to_email=admin_email, subject=subject, message=body)
     
     return {
         "username": db_user.username,
@@ -287,7 +288,6 @@ async def delete_account(db: db_dependency, current_user: str = Depends(get_curr
 
     db.commit()
 
-    admin_email = "schemalinkanacleto@gmail.com"
     admin_subject = f"Account deletion notice: {db_user.username}"
     admin_body = (
         f"The following user has deleted his account from SchemaLink:\n\n"
@@ -644,11 +644,10 @@ async def subscribe_policy( data: UserSubscribesPolicyRequest, db: db_dependency
         f"The user **{data.username}** has requested to subscribe to the **{data.policyName}** policy."
         f"\n\nSchemaLink Notification System"
     )
-    to_email = "schemalinkanacleto@gmail.com"
 
     logging.info(f"Sending email to notify policy request")
 
-    send_email(to_email=to_email, subject=subject, message=body)
+    send_email(to_email=admin_email, subject=subject, message=body)
 
     return {
         "message": "Policy subscription request created successfully.",
@@ -699,6 +698,7 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
     remaining_time_str = f"{int(hours_remaining)}:{int(minutes_remaining):02d}"
 
     return {
+        "hasSubscription": True,
         "policyName": policy.name,
         "operationsDone": operations_done,
         "maxAccess": policy.maxAccess,
@@ -813,9 +813,8 @@ async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
         f"See attached file for the SchemaLink JSON internal representation."
         f"\n\nSchemaLink Notification System"
     )
-    to_email = "schemalinkanacleto@gmail.com"
     
-    send_email(to_email=to_email, subject=subject, message=body, attachment=temp_file_path)
+    send_email(to_email=admin_email, subject=subject, message=body, attachment=temp_file_path)
 
     subject = "Thanks for contributing to the AI store"
     body = (
@@ -944,8 +943,7 @@ async def generate(request: Request):
         body = (
             f"An OpenAI request failed due to a rate or funding limit being exceeded.\n\n"
             f"\n\nSchemaLink Notification System")
-        to_email = "schemalinkanacleto@gmail.com"
-        send_email(to_email=to_email, subject=subject, message=body)
+        send_email(to_email=admin_email, subject=subject, message=body)
 
         # include 'insufficient_quota'
         return JSONResponse(status_code=429, content={"error": "Quota exceeded or rate limited", "details": str(e)})
@@ -981,8 +979,7 @@ async def ask(request: Request):
         body = (
             f"An OpenAI request failed due to a rate or funding limit being exceeded.\n\n"
             f"\n\nSchemaLink Notification System")
-        to_email = "schemalinkanacleto@gmail.com"
-        send_email(to_email=to_email, subject=subject, message=body)
+        send_email(to_email=admin_email, subject=subject, message=body)
 
         # include 'insufficient_quota'
         return JSONResponse(status_code=429, content={"error": "Quota exceeded or rate limited", "details": str(e)})
