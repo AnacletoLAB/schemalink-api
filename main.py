@@ -736,7 +736,7 @@ async def get_user_subscription(request: UsernameRequest, db: db_dependency):
 scheduler = BackgroundScheduler()
 
 # Update a user
-@app.patch("/update-user/")
+@app.patch("/api/update-user/")
 async def update_user(user_update: UserUpdateRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == user_update.username).first()
 
