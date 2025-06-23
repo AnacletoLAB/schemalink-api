@@ -32,6 +32,7 @@ endDate TIMESTAMPTZ,
 requestDate TIMESTAMPTZ,
 status VARCHAR(8) NOT NULL CHECK (status IN ('pending', 'active', 'rejected', 'expired')),
 policyName VARCHAR(8) NOT NULL CHECK (policyName IN ('trial', 'silver', 'gold', 'platinum'))
+numOperations INT,
 REFERENCES Policy(name) ON DELETE RESTRICT,
 PRIMARY KEY (username, requestDate)
 );

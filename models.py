@@ -71,6 +71,7 @@ class UserSubscribesPolicy(Base):
     requestDate = Column("requestdate", DateTime(timezone=True), primary_key=True)
     status = Column(String(8), nullable=False)
     policyName = Column("policyname", String(8), ForeignKey("policy.name", ondelete="RESTRICT"), nullable=False)
+    numOperations = Column("numoperations", Integer, nullable=True)
     
     user = relationship("User", back_populates="subscriptions")
     policy = relationship("Policy", back_populates="subscriptions")

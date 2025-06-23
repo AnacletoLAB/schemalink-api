@@ -31,20 +31,16 @@ async def handle_notify(connection, pid, channel_name, payload):
                     f"Best regards,\n"
                     f"The SchemaLink Team"
                 )
+                
                 now = datetime.now(local_tz)
                 end_date = now + timedelta(hours=24)
-
-                if now.time() <= time(12, 0):  # From 00:00:01 to 12:00:00
-                    end_date = (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-                else:   # From 12:00:01 to 23:59:59
-                    end_date = (now + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
                 
                 try:
                     await connection.execute("""
                         INSERT INTO UserSubscribesPolicy (
-                            username, startDate, endDate, requestDate, status, policyName
-                        ) VALUES ($1, $2, $3, $4, $5, $6)
-                    """, username, now, end_date, now, 'active', 'trial')
+                            username, startDate, endDate, requestDate, status, policyName, numOperations
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    """, username, now, end_date, now, 'active', 'trial', 10)
 
                     print(f"Assigned 'trial' policy to user {username}")
                 except Exception as e:

@@ -99,7 +99,6 @@ class UserSubscribesPolicyRequest(BaseModel):
     username: str
     policyName: str
 
-
 class UserMadeOperationInput(BaseModel):
     username: str
     operationName: str
@@ -117,6 +116,7 @@ class ContributeRequest(BaseModel):
     diagramName: str
     graphJson: str
 
+
 # Database Connection Function
 def get_db ():
     db = SessionLocal()
@@ -127,6 +127,7 @@ def get_db ():
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["schemalink.anacleto.di.unimi.it", "http://localhost:8000","http://localhost:4200",],
@@ -134,6 +135,7 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
 
 # Register a User
 @app.post("/api/auth/register/")
@@ -201,6 +203,7 @@ async def register_user(user: UserBase, db: db_dependency):
         "status": db_user.status
     }
 
+
 # Login a User and return JWT Token
 @app.post("/api/auth/login/")
 async def login_user(user: UserLogin, db: db_dependency):
@@ -258,12 +261,14 @@ async def login_user(user: UserLogin, db: db_dependency):
 
     return response   
 
+
 # Logout a User
 @app.post("/api/auth/logout/")
 async def logout_user():
     response = JSONResponse(content={"message": "Logged out"})
     response.delete_cookie("access_token")
     return response
+
 
 # Delete user account
 @app.post("/api/auth/delete-account/")
@@ -306,6 +311,7 @@ async def get_users(db: db_dependency):
 
     return db_users
 
+
 # Update user status
 @app.post("/api/update-status/")
 async def update_user_status( status_update: UpdateUserStatusRequest, db: db_dependency):
@@ -345,12 +351,14 @@ async def update_user_status( status_update: UpdateUserStatusRequest, db: db_dep
         }
     }
 
+
 # Get all user subscriptions to policies
 @app.post("/api/get-user-subscriptions/", response_model=List[UserSubscribesPolicyBase])
 async def get_user_subscriptions(db: db_dependency):
     db_subscriptions = db.query(models.UserSubscribesPolicy).all()
 
     return db_subscriptions
+    
 
 # Update user policy status
 @app.post("/api/update-subscription-status/")
@@ -359,7 +367,6 @@ async def update_subscription_status( status_subscription_update: UpdateUserStat
         models.UserSubscribesPolicy.username == status_subscription_update.username,
         models.UserSubscribesPolicy.status == "pending" 
     ).first()
-
 
     if not policySubscription:
         raise HTTPException(
@@ -386,35 +393,49 @@ async def update_subscription_status( status_subscription_update: UpdateUserStat
     if new_status == "active":
         now = datetime.now(local_tz)
 
-        db.execute(
-            text("""
-                UPDATE UserSubscribesPolicy
-                SET status = 'expired', endDate = :now
-                WHERE username = :username
-                AND status = 'active'
-                AND startDate <= :now AND endDate >= :now
-            """),
-            {"username": policySubscription.username, "now": now}
-        )
+        existing_active = db.query(models.UserSubscribesPolicy).filter(
+            models.UserSubscribesPolicy.username == policySubscription.username,
+            models.UserSubscribesPolicy.status == "active",
+            models.UserSubscribesPolicy.startDate <= now,
+            models.UserSubscribesPolicy.endDate >= now
+        ).first()
+
+        residual_operations = 0
+
+        if existing_active and policySubscription.policyName != "platinum":
+            used_operations = db.query(models.UserMadeOperation).filter(
+                models.UserMadeOperation.username == existing_active.username,
+                models.UserMadeOperation.date >= existing_active.startDate,
+                models.UserMadeOperation.date <= existing_active.endDate
+            ).count()
+
+            total_allowed = existing_active.numOperations or 0
+            residual_operations = max(total_allowed - used_operations, 0)
+        
+        if existing_active:
+            existing_active.status = "expired"
+            existing_active.endDate = now
 
         policySubscription.startDate = now
 
         if policySubscription.policyName == "silver":
             duration_days = 3
+            maxAccess = 50
         elif policySubscription.policyName == "gold":
             duration_days = 7
+            maxAccess = 100
         elif policySubscription.policyName == "platinum":
             duration_days = 7
+            maxAccess = None
         else:
             raise HTTPException(status_code=400, detail="Invalid policy name")
             
-        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
-        midnight_next_day = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        if now.time() <= time(12, 0):  # From 00:00:01 to 12:00:00
-            policySubscription.endDate = (now + timedelta(days=duration_days)).replace(hour=12, minute=0, second=0, microsecond=0)
-        else:  # From 12:00:01 to 23:59:59
-            policySubscription.endDate = (now + timedelta(days=duration_days + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if policySubscription.policyName != "platinum":
+            policySubscription.numOperations = maxAccess + residual_operations
+        else:
+            policySubscription.numOperations = None
+            
+        policySubscription.endDate = now + timedelta(days=duration_days)
 
     db.commit()
     db.refresh(policySubscription)
@@ -474,10 +495,16 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
     if policy_name == "platinum":
         return JSONResponse(content={"allowed": True, "policy": policy_name})
 
-    # Policy max access
     max_access = db.execute(
-        text("SELECT maxAccess FROM Policy WHERE name = :name"),
-        {"name": policy_name}
+        text("""
+            SELECT numOperations
+            FROM UserSubscribesPolicy
+            WHERE username = :username
+            AND startDate <= :now
+            AND endDate >= :now
+            AND status = 'active'
+        """),
+        {"username": username, "now": now}
     ).scalar()
 
     # Operations performed by the user
@@ -494,6 +521,7 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
         return JSONResponse(content={"allowed": False, "reason": "You reached the maximum number of intelligent requests for your policy."}) 
 
     return JSONResponse(content={"allowed": True, "policy": policy_name})
+
 
 # User made operation
 @app.post("/api/user-operation/")
@@ -520,8 +548,7 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
 
             if subscription:
                 policy = db.query(models.Policy).filter_by(name=subscription.policyName).first()
-                
-                print("Loaded policy:", policy.name, policy.maxAccess, policy.threshold)
+
                 if policy:
                     op_count = db.query(models.UserMadeOperation).filter(
                         models.UserMadeOperation.username == operation.username,
@@ -533,7 +560,7 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
 
                     if (policy.name != "platinum"):
                         threshold = policy.threshold if policy.threshold is not None else 0
-                        if op_count == (policy.maxAccess - threshold):
+                        if op_count == (subscription.numOperations - threshold):
                             threshold_reached = True
                             user = db.query(models.User).filter_by(username=operation.username).first()
                             if user:
@@ -542,7 +569,7 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
                                     f"Hi {user.username},\n\n"
                                     f"You have {policy.threshold} intelligent requests remaining"
                                     f"under your current '{policy.name}' subscription plan.\n\n"
-                                    f"Once you reach the limit of {policy.maxAccess} intelligent requests, your subscription will expire "
+                                    f"Once you reach the limit of {subscription.numOperations} intelligent requests, your subscription will expire "
                                     f"and you will no longer be able to use intelligent requests.\n\n"
                                     f"To continue uninterrupted, consider upgrading or renewing your plan.\n\n"
                                     f"Thank you for using SchemaLink!\n"
@@ -551,7 +578,7 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
                                 )
                                 send_email(to_email=user.email, subject=subject, message=body)
 
-                        if op_count >= policy.maxAccess:
+                        if op_count >= subscription.numOperations:
                             subscription.status = 'expired'
                             subscription.endDate = now
                             db.commit()
@@ -565,12 +592,13 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
                 "date": db_operation.date,
                 "policyName": policy.name,
                 "policyThreshold": policy.threshold,
-                "policyMaxAccess": policy.maxAccess
+                "policyMaxAccess": subscription.numOperations
             }
         }
     except Exception as e:
         print(f"Error: {e}")
         return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
 
 # User subscribes to a policy
 @app.post("/api/subscribe-policy/")
@@ -658,6 +686,7 @@ async def subscribe_policy( data: UserSubscribesPolicyRequest, db: db_dependency
         }
     }
 
+
 # Get user subscription details
 @app.post("/api/get-user-subscription-details/")
 async def get_user_subscription_details(request: UsernameRequest, db: db_dependency):
@@ -701,9 +730,10 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
         "hasSubscription": True,
         "policyName": policy.name,
         "operationsDone": operations_done,
-        "maxAccess": policy.maxAccess,
+        "maxAccess": subscription.numOperations,
         "hoursRemaining": remaining_time_str,
     }
+
 
 # Get user subscription active or pending
 @app.post("/api/get-user-subscription/")
@@ -733,7 +763,6 @@ async def get_user_subscription(request: UsernameRequest, db: db_dependency):
         "pendingPolicyName": pending_sub.policyName if pending_sub else None
     }
 
-scheduler = BackgroundScheduler()
 
 # Update a user
 @app.patch("/api/update-user/")
@@ -790,6 +819,7 @@ async def update_user(user_update: UserUpdateRequest, db: Session = Depends(get_
         "status": user.status
     }
 
+
 # Contribute on AI store
 @app.post("/api/contribute/")
 async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
@@ -832,6 +862,184 @@ async def contribute_on_ai_store(request: ContributeRequest, db: db_dependency):
 
     return JSONResponse(content={"message": "Contribution received successfully"}, status_code=200)
 
+
+# All subscription
+@app.post("/api/dashboard-subscriptions/")
+async def dashboard_subscriptions(db: db_dependency):
+    try:
+        result = db.execute (
+            text ("""
+                SELECT policyName, COUNT(*) as count
+                FROM UserSubscribesPolicy
+                WHERE status = 'active'
+                GROUP BY policyName
+            """)
+        )
+
+        data = result.fetchall()
+        response = {policy: count for policy, count in data}
+
+        return response
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+# Most active users
+@app.get("/api/most-active-users/")
+async def most_active_users(db: db_dependency):
+    try:
+        query = text("""
+            SELECT username, COUNT(*) AS operations_count
+            FROM UserMadeOperation
+            GROUP BY username
+            ORDER BY operations_count DESC
+            LIMIT 10
+        """)
+
+        result = db.execute(query)
+        data = result.fetchall()
+
+        response = [{"username": row.username, "operations_count": row.operations_count} for row in data]
+        return response
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+# Operations by policy category
+@app.get("/api/operations-by-policy-category")
+async def operations_by_policy_category(db=Depends(get_db)):
+    try:
+        query = text("""
+            SELECT
+                usp.policyName AS policy,
+                c.name AS category,
+                COUNT(*) AS count
+            FROM UserSubscribesPolicy usp
+            JOIN UserMadeOperation umo ON umo.username = usp.username
+            JOIN OperationIsCategory oic ON oic.operationName = umo.operationName
+            JOIN Category c ON c.name = oic.categoryName
+            GROUP BY usp.policyName, c.name
+            ORDER BY usp.policyName, c.name
+        """)
+
+        result = db.execute(query)
+        rows = result.fetchall()
+
+        data = {}
+        for row in rows:
+            policy = row.policy
+            category = row.category
+            count = row.count
+
+            if policy not in data:
+                data[policy] = {}
+            data[policy][category] = count
+
+        return data
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+# User growth by policy
+@app.get("/api/user-growth-by-policy")
+async def user_growth_by_policy(db=Depends(get_db)):
+    try:
+        query = text("""
+            SELECT 
+                DATE_TRUNC('month', startDate) AS month,
+                policyName,
+                COUNT(DISTINCT username) AS active_users
+            FROM UserSubscribesPolicy
+            WHERE status = 'active'
+            GROUP BY month, policyName
+            ORDER BY month, policyName
+        """)
+
+        result = db.execute(query)
+        rows = result.fetchall()
+
+        data = {}
+        for row in rows:
+            month_str = row.month.strftime('%Y-%m')
+            policy = row.policyname
+            active_users = row.active_users
+
+            if month_str not in data:
+                data[month_str] = {"month": month_str, "trial": 0, "silver": 0, "gold": 0, "platinum": 0}
+            data[month_str][policy] = active_users
+
+        sorted_data = [data[month] for month in sorted(data.keys())]
+
+        return sorted_data
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+# Average latency by policy
+@app.get("/api/average-latency-by-policy")
+async def average_latency_by_policy(db=Depends(get_db)):
+    try:
+        query = text("""
+            WITH UserRequests AS (
+              SELECT
+                umo.username,
+                umo.date,
+                usp.policyName
+              FROM UserMadeOperation umo
+              JOIN UserSubscribesPolicy usp ON umo.username = usp.username
+                AND umo.date >= usp.startDate
+                AND (usp.endDate IS NULL OR umo.date <= usp.endDate)
+                AND usp.status = 'active'
+            ),
+            RankedRequests AS (
+              SELECT
+                username,
+                policyName,
+                date,
+                LEAD(date) OVER (PARTITION BY username ORDER BY date) AS next_date
+              FROM UserRequests
+            ),
+            Differences AS (
+              SELECT
+                policyName,
+                EXTRACT(EPOCH FROM (next_date - date)) AS latency_seconds
+              FROM RankedRequests
+              WHERE next_date IS NOT NULL
+            )
+            SELECT
+              policyName,
+              AVG(latency_seconds) AS avg_latency_seconds
+            FROM Differences
+            GROUP BY policyName
+            ORDER BY policyName
+        """)
+
+        result = db.execute(query)
+        rows = result.fetchall()
+
+        data = { "trial": 0, "silver": 0, "gold": 0, "platinum": 0 }
+        for row in rows:
+            policy = row.policyname
+            avg_latency = float(row.avg_latency_seconds)
+            data[policy] = avg_latency
+
+        return data
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+scheduler = BackgroundScheduler()
+
 # Start the listener during the app's startup in FastAPI and set up the scheduler
 @app.on_event("startup")
 async def startup_event():
@@ -839,7 +1047,7 @@ async def startup_event():
 
     scheduler.add_job(
         expire_subscriptions_job,
-        CronTrigger(hour='0,12', minute='1')
+        CronTrigger(minute='*/5')
     )
 
     scheduler.start()
@@ -847,6 +1055,7 @@ async def startup_event():
 @app.on_event("shutdown")
 def shutdown_event():
     scheduler.shutdown()
+
 
 @app.post(
     "/api/gen-pydantic/",
