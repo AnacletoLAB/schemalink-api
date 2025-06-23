@@ -130,7 +130,7 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["schemalink.anacleto.di.unimi.it", "http://localhost:8000","http://localhost:4200",],
+    allow_origins=["schemalink.biodata.di.unimi.it", "schemalink.anacleto.di.unimi.it", "http://localhost:8000","http://localhost:4200",],
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers

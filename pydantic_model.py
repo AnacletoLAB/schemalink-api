@@ -61,10 +61,10 @@ class LinkMLMeta(RootModel):
         return key in self.root
 
 
-linkml_meta = LinkMLMeta({'default_prefix': 'https://schemalink.anacleto.di.unimi.it/untitled_schema/',
+linkml_meta = LinkMLMeta({'default_prefix': 'https://schemalink.biodata.di.unimi.it/untitled_schema/',
      'default_range': 'string',
      'description': '',
-     'id': 'https://schemalink.anacleto.di.unimi.it/untitled_schema',
+     'id': 'https://schemalink.biodata.di.unimi.it/untitled_schema',
      'imports': ['ontogpt:core', 'linkml:types'],
      'name': 'untitled_schema',
      'prefixes': {'linkml': {'prefix_prefix': 'linkml',
@@ -227,7 +227,7 @@ class AnnotatorResult(ConfiguredBaseModel):
 
 
 class Aa(NamedEntity):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'https://schemalink.anacleto.di.unimi.it/untitled_schema'})
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'https://schemalink.biodata.di.unimi.it/untitled_schema'})
 
     aa_id: str = Field(default=..., description="""A unique identifier for the Aa class.""", json_schema_extra = { "linkml_meta": {'alias': 'aa_id', 'domain_of': ['Aa']} })
     id: str = Field(default=..., description="""A unique identifier for the named entity""", json_schema_extra = { "linkml_meta": {'alias': 'id',
