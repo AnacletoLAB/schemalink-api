@@ -11,4 +11,5 @@ asyncpg
 pytz
 apscheduler
 chroma
+chromadb
 Levenshtein
