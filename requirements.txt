@@ -10,3 +10,5 @@ pyjwt
 asyncpg
 pytz
 apscheduler
+chroma
+Levenshtein
