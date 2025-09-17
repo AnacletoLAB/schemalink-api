@@ -1,0 +1,46 @@
+classes:
+  Disease:
+    annotations:
+      annotators: sqlite:obo:mondo
+      prompt.examples: Alzheimer's disease, diabetes, hypertension
+    description: The name of a disease or condition.
+    id_prefixes:
+    - MONDO
+    is_a: NamedEntity
+  DiseasePhenotypePredicate:
+    attributes:
+      label:
+        description: The predicate for the DiseasePhenotype relationships.
+    is_a: RelationshipType
+  DiseasePhenotypeRelationship:
+    description: A triple where the subject is a Disease and the object is a Phenotype.
+    is_a: Triple
+    slot_usage:
+      object:
+        range: Phenotype
+      predicate:
+        range: DiseasePhenotypePredicate
+      subject:
+        range: Disease
+  Phenotype:
+    annotations:
+      annotators: sqlite:obo:hp
+      prompt.examples: cognitive decline, increased blood pressure, fatigue
+    description: The observable characteristics or traits associated with a disease.
+    id_prefixes:
+    - HP
+    is_a: NamedEntity
+default_range: string
+description: A template for extracting diseases and their associated phenotypes.
+id: http://w3id.org/ontogpt/disease_phenotype
+imports:
+- linkml:types
+- ontogpt:core
+license: https://creativecommons.org/publicdomain/zero/1.0/
+name: disease_phenotype
+prefixes:
+  HP: http://purl.obolibrary.org/obo/hp/hp-international.owl
+  MONDO: http://purl.obolibrary.org/obo/mondo.owl
+  linkml: https://w3id.org/linkml/
+  rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns#
+title: Disease and Phenotype Extraction Template

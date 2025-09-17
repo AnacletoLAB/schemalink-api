@@ -461,8 +461,8 @@ async def check_user_operation(request_data: OperationRequest, db: db_dependency
     username = request_data.username
     operation = request_data.operation
 
-    print("Username received:", username)
-    print("Operation received:", operation)
+    #print("Username received:", username)
+    #print("Operation received:", operation)
 
     # Username null
     if not username:
@@ -543,6 +543,8 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
         db.refresh(db_operation)
 
         threshold_reached = False
+        policy = None
+        subscription = None
 
         if (operation.username != "schemalink"):
 
@@ -595,9 +597,9 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
                 "username": db_operation.username,
                 "operationName": db_operation.operationName,
                 "date": db_operation.date,
-                "policyName": policy.name,
-                "policyThreshold": policy.threshold,
-                "policyMaxAccess": subscription.numOperations
+                "policyName": policy.name if policy else None,
+                "policyThreshold": policy.threshold if policy else None,
+                "policyMaxAccess": subscription.numOperations if subscription else None
             }
         }
     except Exception as e:
@@ -1201,41 +1203,6 @@ def replace_class_in_schema(schema, class_name, column, new_column_block):
 
 @app.post("/api/openai/generate/")
 async def generate(request: Request):
-    # if not (OPENAI_API_KEY and OPENAI_THREAD_ID and OPENAI_ASSISTANT_ID):
-    #     return Response(
-    #         status_code=500,
-    #         content="OpenAI API key, thread ID, or assistant ID not set",
-    #     )
-
-    # raw_body = await request.body()
-    # client = OpenAI(api_key=OPENAI_API_KEY)
-    # try:
-    #     client.beta.threads.messages.create(
-    #         thread_id=OPENAI_THREAD_ID, role="user", content=raw_body.decode("utf-8"),
-    #     )
-    #     run = client.beta.threads.runs.create_and_poll(
-    #         thread_id=OPENAI_THREAD_ID, assistant_id=OPENAI_ASSISTANT_ID
-    #     )
-    #     if run.status == "completed":
-    #         messages = client.beta.threads.messages.list(thread_id=run.thread_id)
-
-    #     return Response(content=messages.data[0].content[0].text.value.replace("```yaml\n", "").replace("```", ""))
-    
-    # except RateLimitError as e:
-    #     subject = "SchemaLink Error: OpenAI rate or fund limit exceeded"
-    #     body = (
-    #         f"An OpenAI request failed due to a rate or funding limit being exceeded.\n\n"
-    #         f"\n\nSchemaLink Notification System")
-    #     send_email(to_email=admin_email, subject=subject, message=body)
-
-    #     # include 'insufficient_quota'
-    #     return JSONResponse(status_code=429, content={"error": "Quota exceeded or rate limited", "details": str(e)})
-
-    # except APIError as e:
-    #     return JSONResponse(status_code=500, content={"error": "OpenAI API error", "details": str(e)})
-    # except OpenAIError as e:
-    #     return JSONResponse(status_code=500, content={"error": "OpenAI error", "details": str(e)})
-    
     raw_body = await request.body()
     body = json.loads(raw_body)
 
@@ -1243,80 +1210,105 @@ async def generate(request: Request):
     operation = body.get("operation")
 
     selected_classes = body.get("classes_names")
-    print("classes PRIMA =", selected_classes)
     classes = [item["caption"] for item in selected_classes if "caption" in item]
-    print("classes DOPO =", classes)
 
     associations = body.get("associations_names")
-    print("associations =", associations)
-    
+
+    match operation:
+        case "AddClassAssociatedToClass" | "AnnotateClassOntology" | "AnnotateClassExample" | "AnnotateClassDescription" | "FixClassName":
+            collection_name = "only_classes"
+        case "AddAttributesToRelationship" | "AddClassesSimilarToEntities" | "FixClassDescription" | "FixClassAttributesName" | "FixClassAttributesType" | "AnnotateRelationshipOntology" | "AnnotateRelationshipExample" | "AnnotateRelationshipDescription" | "FixRelationshipName" | "AddAssociationsSimilarToEntities" | "AnnotateSubschemaDescription":
+            collection_name = "classes_and_relationships"
+        case "AddClassSimilarToClass" | "ReifyClass" | "ExplainClass" | "ExplainEntities" | "FixClassOntology" | "FixRelationshipCardinality" | "AddAttributesToClass" | "AddAttributesDescription" | "AddParentClass" | "AddChildClass" | "FixClassAttributesDescription" | "FixClassExample" | "AddRelationshipAttributesDescription" | "FixRelationshipAttributesName" | "FixRelationshipAttributesType" | "FixRelationshipOntology" | "FixRelationshipExample" | "ExplainRelationship" | "AnnotateSubschemaOntology" | "AnnotateSubschemaExample" | "FixClassesAndAssociationsName" | "FixSubschemaOntology" | "FixSubschemaExample" | "FixSubschemaCardinalities" | "FixClassesAndAssociationsDescription":
+            collection_name = "full_schemas"
+        case _:
+            operation = "Generate"
+            collection_name = "full_schemas"
 
     client = await chromadb.AsyncHttpClient(host='localhost', port=8001)
 
     try:
-        collection = await client.get_collection('my_collection')
+        collection = await client.get_collection(collection_name)
     except Exception as e:
         return Response(content="Error retrieving collection", status_code=500)
-    
-    match = re.search(r"id:\s*(https?://\S+)", received_prompt_text)
-    if match:
-        schema_id = match.group(1)
-    else:
-        return Response(content="ID not found in raw_body.", status_code=400)
-    
-    
-    intro_schema_match = re.search(r"(id:.*?\nclasses:)", received_prompt_text, re.DOTALL)
-    if intro_schema_match:
-        intro_schema = intro_schema_match.group(1).strip()      # this extracts the initial part from the given LinkML schema. This part includes the schema id, title, description and other informations that do not have to be modified
-    else:
-        return None
-    
-    start_index = received_prompt_text.find("id:")
-    if start_index != -1:
-        prompt_text_substring = received_prompt_text[start_index:]
-    schemas_classes_match = re.search(r'classes:\s*(.*?)\n(?:\w+:|$)', prompt_text_substring, re.DOTALL)
-    if schemas_classes_match:
-        classes_section = schemas_classes_match.group(1).strip()    # this extracts the classes section from the given LinkML schema
-        classes_section = '  ' + classes_section.lstrip()
-        original_schema_classes_names = re.findall(r'^\s*([A-Z][A-Za-z0-9_]+):', classes_section, re.MULTILINE)       # this extracts only classes names from classes_section
-    
-    prompt_text_modified = received_prompt_text.replace("\n", " ")    # this removes possible empty lines at the beginning of the string in received_prompt_text
-    match_intro = re.match(r"^(.*?\.)\s", prompt_text_modified + " ")
-    if match_intro:
-        intro = match_intro.group(1).strip()
-    else:
-        intro = received_prompt_text.split("\n")[0].strip()
-    
-    query_embedding = get_embedding(intro + "SCHEMA:" + schema_id)
-    results = await collection.query(query_embeddings=[query_embedding], n_results=2)
 
-    print("Most similar documents:")
-    for i in range(len(results["ids"][0])):
-        print(f"ID: {results['ids'][0][i]}")
+    if operation == "Generate":
+        query_embedding = get_embedding(received_prompt_text)
+    else:
+        match = re.search(r"id:\s*(https?://\S+)", received_prompt_text)
+        if match:
+            schema_id = match.group(1)
+        else:
+            return Response(content="ID not found in raw_body.", status_code=400)
+        
+        intro_schema_match = re.search(r"(id:.*?\nclasses:)", received_prompt_text, re.DOTALL)
+        if intro_schema_match:
+            intro_schema = intro_schema_match.group(1).strip()      # this extracts the initial part from the given LinkML schema. This part includes the schema id, title, description and other informations that do not have to be modified
+        else:
+            return None
     
+        start_index = received_prompt_text.find("id:")
+        if start_index != -1:
+            prompt_text_substring = received_prompt_text[start_index:]
+        schemas_classes_match = re.search(r'classes:\s*(.*?)\n(?:\w+:|$)', prompt_text_substring, re.DOTALL)
+        if schemas_classes_match:
+            classes_section = schemas_classes_match.group(1).strip()    # this extracts the classes section from the given LinkML schema
+            classes_section = '  ' + classes_section.lstrip()
+            original_schema_classes_names = re.findall(r'^\s*([A-Z][A-Za-z0-9_]+):', classes_section, re.MULTILINE)       # this extracts only classes names from classes_section
+        
+        prompt_text_modified = received_prompt_text.replace("\n", " ")    # this removes possible empty lines at the beginning of the string in received_prompt_text
+        match_intro = re.match(r"^(.*?\.)\s", prompt_text_modified + " ")
+        if match_intro:
+            intro = match_intro.group(1).strip()
+        else:
+            intro = received_prompt_text.split("\n")[0].strip()
+        
+        query_embedding = get_embedding(intro + "SCHEMA:" + schema_id)
+    
+
+    results = await collection.query(query_embeddings=[query_embedding], n_results=10, include=["metadatas", "distances", "documents"])
+
     similar_schemas = results["ids"][0]
     
     prompt = f"{received_prompt_text}"
     if similar_schemas:
         prompt += "\nCONTEXT:\n"
-        prompt += "\n".join(similar_schemas) + "\n"
-    
+        if collection_name == "full_schemas":
+            for meta in results["metadatas"][0][:10]:
+                prompt += f"\n{meta.get('content')}\n\n"
+        else:
+            for i in range(10):
+                prompt += results['documents'][0][i] + "\n\n"
+
     openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model="gpt-4o-mini",
+            temperature=0,
+            max_tokens=3000,
             messages=[
-                {"role": "system", "content": "You are an expert LinkML schema curator. Output anything but LinkML schemas. Only yaml code must be in the output, nothing else."},
+                {"role": "system", "content": "You are an expert in LinkML schemas. Output only valid YAML LinkML schema, no explanations. Use CONTEXT to improve the output but not include it in the output. Answer as fast as possible."},
                 {"role": "user", "content": prompt}
             ],
         )
 
+        print("Prompt:\n", prompt)
         new_schema_yaml = response.choices[0].message.content
+        print("Generated schema:\n", new_schema_yaml)
 
-        new_schema_yaml = re.sub(r"^```yaml\s*", "", new_schema_yaml)
+        new_schema_yaml = re.sub(r"^```yaml\s*", "", new_schema_yaml).split("\nCONTEXT")[0] # it removes the ```yaml at the beginning of the output, if present, and anything that is after the word "\nCONTEXT" (included)
         new_schema_yaml = new_schema_yaml.strip('`').strip()
+        new_schema_yaml = new_schema_yaml.replace("mixins: {}", "mixins: []")   # it replaces "mixins: {}" with "mixins: []" because the first one is not valid in LinkML
         new_schema_yaml = re.sub(r'\n\s*\n$', '\n', new_schema_yaml)        # it removes possible empty lines at the end
+        if operation == "Generate":
+            new_schema_yaml = re.sub(
+                r'prompt\.examples:\s*\'\'', 
+                'prompt.examples: |\n      # no examples provided', 
+                new_schema_yaml
+            )
+
+            return Response(content=new_schema_yaml)
     except RateLimitError as e:
         subject = "SchemaLink Error: OpenAI rate or fund limit exceeded"
         body = (
@@ -1577,6 +1569,9 @@ async def generate(request: Request):
                         class_block = class_block.replace("    annotations: {}", "    annotations:\n" + new_annotations_block)
                     else:
                         new_annotations_block = old_annotations_block.replace("      prompt.examples: ''", "")
+                        new_prompt_example = new_prompt_example.split(",")
+                        new_prompt_example = [s.replace(",", "") for s in new_prompt_example]
+                        new_prompt_example = ",".join(new_prompt_example)
                         new_annotations_block += "\n      prompt.examples: " + new_prompt_example
                         class_block = class_block.replace(old_annotations_block, new_annotations_block)
                     
@@ -1621,6 +1616,9 @@ async def generate(request: Request):
                         class_block = class_block.replace("    annotations: {}", "    annotations:\n" + new_annotations_block)
                     else:
                         new_annotations_block = old_annotations_block.replace("      prompt.examples: ''", "")
+                        new_prompt_example = new_prompt_example.split(",")
+                        new_prompt_example = [s.replace(",", "") for s in new_prompt_example]
+                        new_prompt_example = ",".join(new_prompt_example)
                         new_annotations_block += "\n      prompt.examples: " + new_prompt_example
                         class_block = class_block.replace(old_annotations_block, new_annotations_block)
                     
@@ -1638,10 +1636,11 @@ async def generate(request: Request):
         case "FixClassOntology":
             old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, classes[0], "id_prefixes")
             old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, classes[0], "annotations")
-            
+
             new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, classes[0], "annotations")
 
             new_annotators_values = extract_class_block_from_schema_UPDATED(new_annotations_block, None, "annotators")
+
             if new_annotators_values is not None:
                 new_annotators_values = new_annotators_values.lstrip('\n').rstrip('\n')
                 new_annotators_values = ', '.join(line.strip('- ').strip() for line in new_annotators_values.splitlines() if line.strip())
@@ -1677,7 +1676,7 @@ async def generate(request: Request):
             min_distance = float('inf')         # it initializes min_distance to an infinite distance
             for name in new_classes:
                 distance = Levenshtein.distance(name, classes[0])
-                if distance < min_distance:
+                if distance < min_distance and name:
                     min_distance = distance
                     closest_class = name
             pattern = rf'^(  ){re.escape(classes[0])}:'
@@ -1962,10 +1961,15 @@ async def generate(request: Request):
             new_attributes = set(new_schema_attributes_names) - set(existing_attributes_names)
             
             relationship_attributes_block += "\n"
+            i = 0
             for attribute in new_attributes:
                 pattern = rf'^[ ]{{6}}{attribute}:\n(.*?)(?=^[ ]{{6}}[a-zA-Z_][\w\-]*:|\Z)'
                 match = re.search(pattern, new_schema_relationship_attributes_block, flags=re.DOTALL | re.MULTILINE)
-                new_attribute = f"      {attribute}:\n" + match.group(1)
+                if i == 0:
+                    new_attribute = f"      {attribute}:\n" + match.group(1)
+                    i += 1
+                else:
+                    new_attribute = f"\n      {attribute}:\n" + match.group(1)
                 relationship_attributes_block += new_attribute
             
             updated_classes_section = replace_class_in_schema(classes_section, associations[0] + "Relationship", "slot_usage", intro_slot_usage + "\n" + relationship_attributes_block)
@@ -2113,6 +2117,25 @@ async def generate(request: Request):
                 updated_classes_section = classes_section
 
             updated_final_schema = intro_schema + "\n" + updated_classes_section
+
+            updated_final_schema = new_schema_yaml.replace("sqlite:obo:gene_ontology", "sqlite:obo:go")  # it replaces the obsolete gene_ontology with go, as required by LinkML
+            updated_final_schema = re.sub(r'-\s*[A-Z0-9_]+:\s*"http://purl\.obolibrary\.org/obo/([a-z0-9_]+)\.owl"', r'- sqlite:obo:\1', updated_final_schema)
+            updated_final_schema = re.sub(r"(sqlite:obo:[a-z0-9_]+):[^,\s]+", r"\1", updated_final_schema)
+            # sostituisci array di annotators con stringhe separate da virgola
+            # cattura pattern come:
+            # annotators:
+            #   - sqlite:obo:ro
+            #   - sqlite:obo:so
+            pattern = r"annotators:\s*\n((?:\s*-\s*[^\n]+\n)+)"
+
+            def array_to_string(match):
+                items = match.group(1)
+                # prendi ogni riga, rimuovi - e spazi
+                cleaned = [i.replace("-", "").strip() for i in items.splitlines() if i.strip()]
+                return f'annotators: "{", ".join(cleaned)}"'
+
+            updated_final_schema = re.sub(pattern, array_to_string, updated_final_schema)
+
         case "AnnotateRelationshipExample":
             # the following code checks if class named as associations[0] + "Relationship" is a Triple
             class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, associations[0] + "Relationship", "is_a")
@@ -2161,7 +2184,6 @@ async def generate(request: Request):
             updated_classes_section = replace_class_in_schema(classes_section, associations[0] + "Relationship", None, relationship_block)
             
             updated_final_schema = intro_schema + "\n" + updated_classes_section
-            print("updated_final_schema =", updated_final_schema)
         case "AnnotateRelationshipDescription":
             # the following code checks if class named as associations[0] + "Relationship" is a Triple
             class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, associations[0] + "Relationship", "is_a")
@@ -2178,7 +2200,7 @@ async def generate(request: Request):
             
             old_class_block = extract_class_block_from_schema_UPDATED(classes_section, associations[0] + "Relationship", None)
 
-            if similarity <= 0.25:           # it checks if old_relationship_description and new_relationship_description are different at least of 75%
+            if similarity <= 0.50:           # it checks if old_relationship_description and new_relationship_description are different at least of 50%
                 if not old_relationship_description:
                     description = new_relationship_description
                     old_class_block += "\n" + "    description: " + description
@@ -2192,7 +2214,8 @@ async def generate(request: Request):
                     updated_classes_section = replace_class_in_schema(classes_section, associations[0] + "Relationship", None, old_class_block)
             else:
                 updated_classes_section = classes_section
-            
+
+            print(updated_classes_section)
             updated_final_schema = intro_schema + "\n" + updated_classes_section
         case "FixRelationshipName":
             # the following code checks if class named as associations[0] + "Relationship" is a Triple
@@ -2268,6 +2291,7 @@ async def generate(request: Request):
             
             updated_final_schema = intro_schema + "\n" + classes_section
         case "FixRelationshipAttributesName":
+            print("FixRelationshipAttributesName")
             # the following code checks if class named as associations[0] + "Relationship" is a Triple
             class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, associations[0] + "Relationship", "is_a")
             new_schema_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, associations[0] + "Relationship", "is_a")
@@ -2316,6 +2340,9 @@ async def generate(request: Request):
             new_relationship_attributes_block = re.sub(r'^[ \t]*predicate:\n', '', new_relationship_attributes_block, flags=re.MULTILINE)
             new_relationship_attributes_block = new_relationship_attributes_block.lstrip('\n')
 
+            print("New Relationship Attributes Block:")
+            print(new_relationship_attributes_block)
+            
             new_description_map = {}
             for match in pattern.finditer(new_relationship_attributes_block):
                 attribute = match.group(1)
@@ -2685,8 +2712,8 @@ async def generate(request: Request):
                     new_class_description = "''"
                 
                 similarity = Levenshtein.ratio(old_class_description, new_class_description)
-                
-                if similarity <= 0.3:           # it checks if old_class_description and new_class_description are different at least of 70%
+
+                if similarity <= 0.9:           # it checks if old_class_description and new_class_description are different at least of 10%
                     if not old_class_description:
                         description = new_class_description
                         old_class_block += "\n" + "    description: " + description
@@ -2723,8 +2750,8 @@ async def generate(request: Request):
 
                 if old_relationship_description is not None:
                     similarity = Levenshtein.ratio(old_relationship_description, new_relationship_description)
-                    
-                    if similarity <= 0.25:           # it checks if old_relationship_description and new_relationship_description are different at least of 75%
+
+                    if similarity <= 0.9:           # it checks if old_relationship_description and new_relationship_description are different at least of 10%
                         if not old_relationship_description:
                             description = new_relationship_description
                             old_class_block += "\n" + "    description: >-      " + description
@@ -2943,7 +2970,6 @@ async def generate(request: Request):
                     return Response(content=updated_final_schema)
             
             new_classes = set(new_schema_classes_names) - set(original_schema_classes_names)
-            print("nuew_classes =", new_classes)
 
             for element in classes:
                 closest_class = None
@@ -3229,10 +3255,10 @@ async def generate(request: Request):
         case "FixSubschemaOntology":
             for element in classes:
                 old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, element, "id_prefixes")
-                old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element, "annotations")
-                
-                new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "annotations")
-                
+                old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element, "annotations") if extract_class_block_from_schema_UPDATED(classes_section, element, "annotations") is not None else "{}"
+
+                new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "annotations") if extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "annotations") is not None else "{}"
+
                 new_annotators_values = extract_class_block_from_schema_UPDATED(new_annotations_block, None, "annotators")
                 if new_annotators_values is not None:
                     new_annotators_values = new_annotators_values.lstrip('\n').rstrip('\n')
@@ -3268,9 +3294,9 @@ async def generate(request: Request):
                     return Response(content=updated_final_schema)
                 
                 old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "id_prefixes")
-                old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "annotations")
+                old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "annotations") if extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "annotations") is not None else "{}"
                 
-                new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "annotations")
+                new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "annotations") if extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "annotations") is not None else "{}"
 
                 new_annotators_values = extract_class_block_from_schema_UPDATED(new_annotations_block, None, "annotators")
                 if new_annotators_values is not None:
@@ -3301,12 +3327,14 @@ async def generate(request: Request):
             updated_final_schema = intro_schema + "\n" + classes_section
 
 
-    # the follwoing code is a fix to ensure that 'prompt.examples' is always defined as a YAML multiline block, even when there are no examples, by adding a default text to prevent errors.
+    # the following code is a fix to ensure that 'prompt.examples' is always defined as a YAML multiline block, even when there are no examples, by adding a default text to prevent errors.
     updated_final_schema = re.sub(
         r'prompt\.examples:\s*\'\'', 
         'prompt.examples: |\n      # no examples provided', 
         updated_final_schema
     )
+
+    print("\n\n\nUpdated schema:\n", updated_final_schema)
 
     return Response(content=updated_final_schema)
 
@@ -3329,6 +3357,7 @@ async def ask(request: Request):
             ],
         )
         response_text = completion.choices[0].message.content.replace("```yaml\n", "").replace("```", "")
+        #print("Response text:", response_text)
         return Response(content=response_text)
 
     except RateLimitError as e:

@@ -113,7 +113,7 @@ CREATE TABLE public.policy (
     name character varying(8) NOT NULL,
     maxaccess integer,
     threshold integer,
-    CONSTRAINT policy_name_check CHECK (((name)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying])::text[])))
+    CONSTRAINT policy_name_check CHECK (((name)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying, 'admin'::character varying])::text[])))
 );
 
 
@@ -127,7 +127,7 @@ CREATE TABLE public.policyallowscategory (
     policyname character varying(8) NOT NULL,
     categoryname character varying(13) NOT NULL,
     CONSTRAINT policyallowscategory_categoryname_check CHECK (((categoryname)::text = ANY ((ARRAY['add'::character varying, 'fix'::character varying, 'reification'::character varying, 'explain'::character varying, 'openGPTDialog'::character varying, 'generate'::character varying])::text[]))),
-    CONSTRAINT policyallowscategory_policyname_check CHECK (((policyname)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying])::text[])))
+    CONSTRAINT policyallowscategory_policyname_check CHECK (((policyname)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying, 'admin'::character varying])::text[])))
 );
 
 
@@ -176,7 +176,7 @@ CREATE TABLE public.usersubscribespolicy (
     status character varying(8) NOT NULL,
     numoperations integer,
     policyname character varying(8) NOT NULL,
-    CONSTRAINT usersubscribespolicy_policyname_check CHECK (((policyname)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying])::text[]))),
+    CONSTRAINT usersubscribespolicy_policyname_check CHECK (((policyname)::text = ANY ((ARRAY['trial'::character varying, 'silver'::character varying, 'gold'::character varying, 'platinum'::character varying, 'admin'::character varying])::text[]))),
     CONSTRAINT usersubscribespolicy_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying, 'rejected'::character varying, 'expired'::character varying])::text[])))
 );
 
@@ -278,6 +278,7 @@ trial	10	3
 silver	50	10
 gold	100	15
 platinum	\N	\N
+admin	\N	\N
 \.
 
 
@@ -310,6 +311,12 @@ platinum	reification
 platinum	explain
 platinum	openGPTDialog
 platinum	generate
+admin	add
+admin	fix
+admin	reification
+admin	explain
+admin	openGPTDialog
+admin	generate
 \.
 
 
@@ -476,3 +483,14 @@ ALTER TABLE ONLY public.usersubscribespolicy
 -- PostgreSQL database dump complete
 --
 
+-- 3. Collego l’utente admin alla nuova policy
+INSERT INTO public.usersubscribespolicy (username, startdate, enddate, requestdate, status, numoperations, policyname)
+VALUES (
+  'schemalink', 
+  NOW(), 
+  NULL, 
+  NOW(), 
+  'active', 
+  NULL, 
+  'admin'
+);
