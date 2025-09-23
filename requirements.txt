@@ -1,4 +1,4 @@
-fastapi
+fastapi[standard]
 linkml
 openai
 uvicorn[standard]
