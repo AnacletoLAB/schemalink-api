@@ -1114,6 +1114,7 @@ async def validate_linkml(request: Request):
     except yaml.YAMLError:
         raise HTTPException(status_code=422, detail="Invalid YAML")
 
+    '''
     with open("schema.yaml", "w") as f:
         f.write(yaml.dump(data))
 
@@ -1129,10 +1130,9 @@ async def validate_linkml(request: Request):
         return FileResponse(
             "report.json", media_type="application/json", filename="report.json"
         )
-
+    '''
 
 def get_embedding(text):
-    """Ottiene l'embedding usando OpenAI text-embedding-3-small"""
     response = openai.embeddings.create(
         model="text-embedding-3-small",
         input=text
@@ -1278,7 +1278,10 @@ async def generate(request: Request):
             # return updated attributes description --> sentence
             # return updated attributes description --> sentence
             collection_name = "full_schemas"
-            instructions = "You are an expert in LinkML schemas. Output only valid YAML LinkML, no explanations. Use CONTEXT to improve the output but not include it in the output."   
+            if operation in ['FixSubschemaCardinalities']: # Refactor this case
+                instructions = "You are an expert in LinkML schemas. Output only valid YAML LinkML, no explanations. Use CONTEXT to improve the output but not include it in the output. IMPORTANT RULE: Note that minimum_cardinality MUST be strictly less than maximum_cardinality i.e. minimum_cardinality and maximum_cardinality CANNOT be equal e.g. minimum_cardinality=1 and maximum_cardinality=1 is NOT valid, instead minimum_cardinality=0 and maximum_cardinality=1 is valid."
+            else:
+                instructions = "You are an expert in LinkML schemas. Output only valid YAML LinkML, no explanations. Use CONTEXT to improve the output but not include it in the output."   
         case "FixClassExample" | "FixClassOntology" | "FixRelationshipOntology" | "FixRelationshipExample":
             # return list of examples --> list
             # return list of ontologies --> list
@@ -1424,10 +1427,10 @@ async def generate(request: Request):
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "class_or_relationship_old_name": {"type": "string"},
-                                        "class_or_relationship_new_name": {"type": "string"}
+                                        "class_or_predicate_old_name": {"type": "string"},
+                                        "class_or_predicate_new_name": {"type": "string"}
                                     },
-                                    "required": ["class_or_relationship_old_name", "class_or_relationship_new_name"]
+                                    "required": ["class_or_predicate_old_name", "class_or_predicate_new_name"]
                                 }
                             }
                         },
@@ -1640,71 +1643,116 @@ async def generate(request: Request):
                 # Convert the updated schema back to YAML
                 updated_final_schema = pyyaml.dump(updated_final_schema_data, sort_keys=False)    
 
-            # ANDREA: qui il prompt ritorna la classe aggiornata. segui la logica sopra e semplicemente sovrascrivi la classe con lo stesso nome nello schema. Occhio solo che se qualche attributo viene eliminato, devi reinserirlo
             case "AddAttributesToClass":
-                # it extracts the attributes of the class that the "AddAttributesToClass" operation is called on from the original schema. The original attributes are needed so that they can be compared to the ones of the same class from the new produced schema in order compare them and avoid to duplicate them.
-                old_attributes_block = extract_class_block_from_schema_UPDATED(classes_section, classes[0], "attributes")
-                pattern = r'^[ \t]*([a-zA-Z_][\w\-]*):\n(?=(?:[ \t]{2,}))'
-                attributes_names = re.findall(pattern, old_attributes_block, flags=re.MULTILINE)
-                
-                # it extracts the attributes of the class that the "Add attributes to class" operation is called on from the new produced schema
-                new_attributes_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, classes[0], "attributes")
-                pattern = r'^[ ]{6}([a-zA-Z_][\w\-]*):\n(?=[ ]{8})'
-                attributes_names_new_schema = re.findall(pattern, new_attributes_block, flags=re.MULTILINE)
-                
-                # it adds to the class "attributes" column ONLY new attributes in attributes_names_new_schema
-                new_attributes = set(attributes_names_new_schema) - set(attributes_names)
-                old_attributes_block += '\n'
-                for attribute in sorted(new_attributes):
-                    pattern = rf'^[ ]{{6}}{attribute}:\n(.*?)(?=^[ ]{{6}}[a-zA-Z_][\w\-]*:|\Z)'     # it extracts all the informations related to this actribute
-                    match = re.search(pattern, new_attributes_block, flags=re.DOTALL | re.MULTILINE)
-                    if match:
-                        new_attribute = f"      {attribute}:\n" + match.group(1)
-                        old_attributes_block += new_attribute + "\n"
-                
-                classes_section = replace_class_in_schema(classes_section, classes[0], "attributes", old_attributes_block)
+                # Parse current and new schema
+                new_schema_data = pyyaml.safe_load(new_schema_yaml)
 
-                updated_final_schema = intro_schema + "\n" + classes_section   
+                # Ensure 'classes' section exists
+                if new_schema_data.get("classes", {}) == {}:
+                    new_classes_data = new_schema_data 
+                else:
+                    new_classes_data = new_schema_data.get("classes", {})
 
-            # ANDREA: qui il prompt ritorna la classe aggiornata. segui la logica sopra e semplicemente sovrascrivi la classe con lo stesso nome nello schema
+                # Class target
+                target_class = classes[0]
+
+                old_class_block = current_schema_yaml.get("classes", {}).get(target_class, {})
+                old_attributes = old_class_block.get("attributes", {})
+
+                new_class_block = new_classes_data.get(target_class, {})
+                new_attributes = new_class_block.get("attributes", {})
+
+                merged_attributes = old_attributes.copy()
+                merged_attributes.update(new_attributes)
+
+                # Aggiorna la classe con la fusione
+                merged_class_block = old_class_block.copy()
+                merged_class_block.update(new_class_block)
+                merged_class_block["attributes"] = merged_attributes
+
+                current_schema_yaml["classes"][target_class] = merged_class_block
+
+                # Convert back to YAML
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
+
             case "AddAttributesDescription":
-                old_attributes_block = extract_class_block_from_schema_UPDATED(classes_section, classes[0], "attributes")
-                
-                new_attributes_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, classes[0], "attributes")
-                
-                new_descriptions = dict(re.findall(
-                    r'^\s{6}([a-zA-Z_][\w\-]*):\n(?:\s{8}.*\n)*?\s{8}description:\s*(.*)',
-                    new_attributes_block,
-                    flags=re.MULTILINE
-                ))
+                #print(new_schema_yaml)
+                # Load new schema classes
+                new_schema_data = pyyaml.safe_load(new_schema_yaml)
+                if new_schema_data.get("classes", {}) == {}:
+                    new_classes_data = new_schema_data
+                else:
+                    new_classes_data = new_schema_data.get("classes", {})
 
-                updated_attributes_block = old_attributes_block
-                for attr, new_desc in new_descriptions.items():
-                    match = re.search(
-                        rf'^(\s{{6}}{re.escape(attr)}:\n(?:\s{{8}}.*\n)*?\s{{8}}description:\s*)(.*)',
-                        updated_attributes_block,
-                        flags=re.MULTILINE
-                    )
-                    if match:
-                        old_desc = match.group(2).strip()
-                        similarity = Levenshtein.ratio(old_desc, new_desc)
-                        
-                        if similarity <= 0.5:           # it checks if old_desc and new_desc are different at least of 50%
-                            combined_desc = f"{old_desc} {new_desc.strip('.')}".strip()
+                # Target class
+                target_class = classes[0]
+
+                # Old and new class blocks
+                old_class_block = current_schema_yaml.get("classes", {}).get(target_class, {}) or {}
+                old_attributes = old_class_block.get("attributes", {}) or {}
+
+                new_class_block = new_classes_data.get(target_class, {}) or {}
+                new_attributes = new_class_block.get("attributes", {}) or {}
+
+                merged_attributes = {}
+                all_attr_names = set(old_attributes.keys()) | set(new_attributes.keys())
+
+                for attr_name in sorted(all_attr_names):
+                    old_attr = old_attributes.get(attr_name, {}) or {}
+                    new_attr = new_attributes.get(attr_name, {}) or {}
+
+                    merged_attr = old_attr.copy()
+
+                    # Merge non-description fields
+                    for k, v in new_attr.items():
+                        if k != "description":
+                            merged_attr[k] = v
+
+                    # Merge descriptions with similarity check
+                    old_desc = old_attr.get("description").strip()
+                    new_desc = new_attr.get("description").strip()
+
+                    if new_desc:
+                        if not old_desc:
+                            merged_attr["description"] = new_desc
                         else:
-                            combined_desc = old_desc
-                        
-                        # it replace the old description with the new updated one
-                        updated_attributes_block = re.sub(
-                            rf'^(\s{{6}}{re.escape(attr)}:\n(?:\s{{8}}.*\n)*?\s{{8}}description:\s*).+',
-                            rf'\1{combined_desc}',
-                            updated_attributes_block,
-                            flags=re.MULTILINE
-                        )
+                            sim = Levenshtein.ratio(old_desc, new_desc)
+                            #print(
+                            #    f"Comparing descriptions for attribute '{attr_name}':\n"
+                            #    f"Old: {old_desc}\nNew: {new_desc}\nSimilarity: {sim}"
+                            #)
+                            if sim <= 0.75:
+                                # Remove trailing punctuation from old_desc
+                                old_trim = old_desc.rstrip(".,;:!?")
+                                # Remove any leading punctuation or spaces from new_desc
+                                new_trim = new_desc.lstrip(" ,.;:!?")
+                                # Avoid duplicating the common initial part (ignoring punctuation differences)
+                                if new_trim.lower().startswith(old_trim.lower()):
+                                    combined = new_trim
+                                else:
+                                    # Use a comma as connector if old_desc ended with punctuation, otherwise use a space
+                                    connector = ", " if old_desc and old_desc[-1] in ".,;:!?" else " "
+                                    combined = (old_trim + connector + new_trim).strip()
+                                merged_attr["description"] = combined
+                            else:
+                                merged_attr["description"] = old_desc
+                    else:
+                        if old_desc:
+                            merged_attr["description"] = old_desc
 
-                classes_section = replace_class_in_schema(classes_section, classes[0], "attributes", updated_attributes_block)
+                    merged_attributes[attr_name] = merged_attr
 
-                updated_final_schema = intro_schema + "\n" + classes_section   
+                # Merge class-level data
+                merged_class_block = old_class_block.copy()
+                merged_class_block.update(new_class_block)
+                merged_class_block["attributes"] = merged_attributes
+
+                # Update schema
+                if "classes" not in current_schema_yaml or current_schema_yaml["classes"] is None:
+                    current_schema_yaml["classes"] = {}
+                current_schema_yaml["classes"][target_class] = merged_class_block
+
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
             case "AnnotateClassDescription":
                 # Parse current schema
@@ -1897,7 +1945,10 @@ async def generate(request: Request):
                             for attr_name, attr_data in attributes.items():
                                 if attr_data.get("range") == target_class:
                                     attr_data["range"] = new_class_name
-
+                            attributes = cls_data.get("slot_usage", {})
+                            for attr_name, attr_data in attributes.items():
+                                if attr_data.get("range") == target_class:
+                                    attr_data["range"] = new_class_name
                 # Update the schema
                 current_schema_data["classes"] = classes_data
 
@@ -2851,16 +2902,16 @@ async def generate(request: Request):
 
                 # Compute newly generated classes
                 new_class_names = set(new_classes_names) - set(original_schema_classes_names)
-                print("New classes identified:", new_class_names)
+                #print("New classes identified:", new_class_names)
 
                 # Work on the current schema YAML and add only association-like classes (Triple / RelationshipType)
                 for name in new_class_names:
-                    print("Considering new class:", name)
+                    #print("Considering new class:", name)
                     class_block = new_classes[name]
-                    print("Class block:", class_block)
+                    #print("Class block:", class_block)
                     is_a_value = class_block.get("is_a")
                     if is_a_value in ("Triple", "RelationshipType"):
-                        print("Adding new association-like class:", name)
+                        #print("Adding new association-like class:", name)
                         current_schema_yaml["classes"][name] = class_block
 
                 # Dump back to YAML
@@ -2935,7 +2986,7 @@ async def generate(request: Request):
                 # Dump back to YAML
                 updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
-            # ANDREA, stessa logica sopra ma ontologie anziché esempi. occhio alla struttura del json
+            # ANDREA, stessa logica sopra ma ontologie anziché esempi. occhio solo alla struttura del json
             case "AnnotateSubschemaOntology":
                 for element in classes:
                     old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, element, "id_prefixes").lstrip('\n').rstrip('\n')
@@ -3038,375 +3089,228 @@ async def generate(request: Request):
 
                 updated_final_schema = intro_schema + "\n" + classes_section
 
-            # EMANUELE, SONO QUI
             case "FixClassesAndAssociationsName":
-                # it checks if elements in "associations" are actually associations names and NOT classes names
-                for element in associations:
-                    is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "is_a")
-                    if is_a_value != "Triple":
-                        updated_final_schema = intro_schema + "\n" + classes_section
-                        return Response(content=updated_final_schema)
-                
-                new_classes = set(new_schema_classes_names) - set(original_schema_classes_names)
+                # Load pairs from the JSON response of the model
+                pairs_data = json.loads(new_schema_yaml)  # Here new_schema_yaml actually contains the JSON pairs according to the json_schema in the prompt
+                pairs = pairs_data.get("pairs", [])
+                #print("Pairs to process:", pairs)
 
-                for element in classes:
-                    closest_class = None
-                    min_distance = float('inf')         # it initializes min_distance to an infinite distance
-                    for name in new_classes:
-                        element_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element, "is_a")
-                        new_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, name, "is_a")
-                        if element_is_a_value == new_class_is_a_value:
-                            distance = Levenshtein.distance(name, element)
-                            if distance < min_distance:
-                                min_distance = distance
-                                closest_class = name
-                    
-                    pattern = rf'^(  ){re.escape(element)}:'
-                    classes_section = re.sub(pattern, rf'  {closest_class}:', classes_section, flags=re.MULTILINE)
-                    classes_section = re.sub(rf'(^[ \t]*range:\s*){re.escape(element)}\n', 
-                                    rf'\1{closest_class}\n', 
-                                    classes_section, 
-                                    flags=re.MULTILINE)
-                    new_classes.discard(closest_class)
-                
-                for element in associations:
-                    closest_class = None
-                    min_distance = float('inf')         # it initializes min_distance to an infinite distance
-                    for name in new_classes:
-                        new_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, name, "is_a")
-                        if new_class_is_a_value == "Triple":
-                            name = name.removesuffix("Relationship")
-                            distance = Levenshtein.distance(name, element)
-                        elif new_class_is_a_value == "RelationshipType":
-                            name = name.removesuffix("Predicate")
-                            distance = Levenshtein.distance(name, element)
-                        else:
-                            distance = min_distance
-                        
-                        if distance < min_distance:
-                            min_distance = distance
-                            closest_class = name
-                    
-                    old_predicate_attributes_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "attributes")
-                    parts = re.split(r'(?=[A-Z])', closest_class)
-                    new_pattern = ' '.join(p.lower() for p in parts if p)
+                # Work on a copy of the classes dict
+                classes_data = current_schema_yaml.get("classes", {})
 
-                    relationship_attributes_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "slot_usage")
-                    
-                    subject_block = extract_class_block_from_schema_UPDATED(relationship_attributes_block, None, "subject")
-                    subject_range_value = extract_class_block_from_schema_UPDATED(subject_block, None, "range").strip().lower()
-                    
-                    object_block = extract_class_block_from_schema_UPDATED(relationship_attributes_block, None, "object").lstrip('\n').rstrip('\n')
-                    object_range_value = extract_class_block_from_schema_UPDATED(object_block, None, "range").strip().lower()
-                    
-                    if new_pattern.startswith(subject_range_value):
-                        new_pattern = new_pattern[len(subject_range_value):]
-                    if new_pattern.endswith(object_range_value):
-                        new_pattern = new_pattern[: -len(object_range_value)]
-                    new_pattern = new_pattern.strip()
+                # Prepare associations list with Predicate suffix
+                associations_with_suffix = [name + "Predicate" for name in associations]
 
-                    updated_predicate_attributes_block = replace_class_in_schema(old_predicate_attributes_block, None, "id", "        pattern: '" + new_pattern + "'")
-                    classes_section = replace_class_in_schema(classes_section, element + "Predicate", "attributes", updated_predicate_attributes_block)
-                
-                updated_final_schema = intro_schema + "\n" + classes_section
+                # Apply renaming based on pairs
+                for mapping in pairs:
+                    old_name = mapping.get("class_or_predicate_old_name")
+                    new_name = mapping.get("class_or_predicate_new_name", "").strip()
+
+                    # --- Case 1: old_name is a class ---
+                    if old_name in classes:
+                        # Normalize new_name (remove spaces)
+                        new_name_clean = re.sub(r'\s+', '', new_name.title())
+                        #print(f"Renaming class {old_name} to {new_name_clean}")
+
+                        # Rename the class: move the block under new_name
+                        classes_data[new_name_clean] = classes_data.pop(old_name)
+
+                        # Update any 'range' references that previously pointed to old_name
+                        for cls_data in classes_data.values():
+                            attributes = cls_data.get("attributes", {})
+                            for attr_name, attr_data in attributes.items():
+                                if attr_data.get("range") == old_name:
+                                    attr_data["range"] = new_name_clean
+
+                            attributes = cls_data.get("slot_usage", {})
+                            for attr_name, attr_data in attributes.items():
+                                if attr_data.get("range") == old_name:
+                                    attr_data["range"] = new_name_clean
+
+                    # --- Case 2: old_name is a Predicate (association) ---
+                    elif old_name in associations_with_suffix:
+                        #print(f"Renaming predicate {old_name} to {new_name}")
+                        # Fix predicate attributes: ensure id.pattern and id.label reflect the new name
+                        attributes = classes_data.get(old_name, {}).get("attributes", {})
+                        #print(f"Old attributes for {old_name}:", attributes)
+                        if "id" not in attributes:
+                            attributes["id"] = {}
+                        #print(f"Updating id pattern for {old_name} to {new_name}")
+                        attributes["id"]["pattern"] = new_name
+                        #print(f"Updated attributes for {old_name}:", attributes)
+                        classes_data[old_name]["attributes"] = attributes
+
+                # Assign updated classes back to schema
+                current_schema_yaml["classes"] = classes_data
+
+                # Convert back to YAML
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
             case "FixClassesAndAssociationsDescription":
-                for element in classes:
-                    is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element, "is_a")
-                    if is_a_value != "Triple" and is_a_value != "RelationshipType":
-                        # it creates a copy of the informations of the class, making sure to remove the "attributes" informations so that the attributes "description" values are not mistaken with the class "description" value
-                        classes_section_copy = replace_class_in_schema(classes_section, element, "attributes", "")
+                # Work on a copy of the classes dict
+                classes_data = current_schema_yaml.get("classes", {})
+                associations = [name + "Relationship" for name in associations]
 
-                        old_description = extract_class_block_from_schema_UPDATED(classes_section_copy, element, "description")
-                        new_class_description = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "description")
-                        if new_class_description is not None:
-                            new_class_description = new_class_description.removeprefix(">-\n")
-                        else:
-                            new_class_description = old_description
-                        
-                        if old_description is None:
-                            new_class_block = extract_class_block_from_schema_UPDATED(classes_section, element, None)
-                            new_class_block += "\n    description: " + new_class_description + "\n"
-                            classes_section = replace_class_in_schema(classes_section, element, None, new_class_block)
-                        else:
-                            classes_section = replace_class_in_schema(classes_section, element, "description", new_class_description)
-                
-                for element in associations:
-                    is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "is_a")
-                    if is_a_value == "Triple":
-                        # it creates a copy of the informations of the class, making sure to remove the "slot_usage" informations so that the attributes "description" values are not mistaken with the class "description" value
-                        classes_section_copy = replace_class_in_schema(classes_section, element + "Relationship", "slot_usage", "")
-                        
-                        old_description = extract_class_block_from_schema_UPDATED(classes_section_copy, element + "Relationship", "description")
-                        new_relationship_description = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Relationship", "description")
-                        if new_relationship_description is not None:
-                            new_relationship_description = new_relationship_description.removeprefix(">-\n")
-                        else:
-                            new_relationship_description = old_description
-                        
-                        if old_description is None:
-                            new_relationship_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", None)
-                            new_relationship_block += "\n    description: " + new_relationship_description + "\n"
-                            classes_section = replace_class_in_schema(classes_section, element + "Relationship", None, new_relationship_block)
-                        else:
-                            classes_section = replace_class_in_schema(classes_section, element + "Relationship", "description", new_relationship_description)
-                
-                updated_final_schema = intro_schema + "\n" + classes_section
+                # Load pairs from JSON response of the model
+                pairs_data = json.loads(new_schema_yaml)  # new_schema_yaml contains the JSON pairs according to json_schema
+                pairs = pairs_data.get("pairs", [])
+                #print("Pairs to process:", pairs)
+
+                # Apply description updates based on pairs
+                for mapping in pairs:
+                    name = mapping.get("class_or_relationship_name")
+                    new_description = mapping.get("description", "").strip()
+
+                    # --- Case 1: name is a class ---
+                    if name in classes:
+                        #print(f"Updating description of class {name}")
+                        classes_data[name]["description"] = new_description
+
+                    # --- Case 2: name is a relationship ---
+                    elif name in associations:
+                        #print(f"Updating description of relationship {name}")
+                        classes_data[name]["description"] = new_description
+
+                # Assign updated classes back to schema
+                current_schema_yaml["classes"] = classes_data
+
+                # Convert back to YAML
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
             case "FixSubschemaCardinalities":
-                for element in associations:
-                    class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "is_a")
-                    new_schema_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Relationship", "is_a")
+                # Parse current schema classes
+                classes_data = current_schema_yaml.get("classes", {})
+                # Parse new schema classes
+                #print("New schema YAML:", new_schema_yaml)
+                new_schema_data = pyyaml.safe_load(new_schema_yaml)
+                # Ensure 'classes' section exists
+                if new_schema_data.get("classes", {}) == {}:
+                    new_classes_data = new_schema_data  # in this case, the entire schema is only classes
+                else:
+                    new_classes_data = new_schema_data.get("classes", {})
+                associations = [name + "Relationship" for name in associations]
+                # Filter new classes to only those matching the associations
+                new_classes_names = set(new_classes_data.keys()).intersection(associations)
+                #print("New relationship classes to process:", new_classes_names)
 
-                    if class_is_a_value == "Triple" and new_schema_class_is_a_value == "Triple":
-                        relationship_slot_usage_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "slot_usage").lstrip('\n').rstrip('\n')
-                        
-                        new_relationship_slot_usage_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Relationship", "slot_usage").lstrip('\n').rstrip('\n')
-                        
-                        subject_match = re.search(r'subject:\s*\n([\s\S]*?)(?=\n\s*object:|\n\s*predicate:|$)', relationship_slot_usage_block, re.DOTALL)
-                        if subject_match:
-                            subject_block = "        " + subject_match.group(1).strip()
-                        
-                        object_match = re.search(r'object:\s*\n([\s\S]*?)(?=\n\s*predicate:)', relationship_slot_usage_block, re.DOTALL)
-                        if object_match:
-                            object_block = "        " + object_match.group(1).strip()
-                        
-                        subject_match = re.search(r'subject:\s*\n([\s\S]*?)(?=\n\s*object:|\n\s*predicate:|$)', new_relationship_slot_usage_block, re.DOTALL)
-                        if subject_match:
-                            new_subject_block = "        " + subject_match.group(1).strip()
+                for rel_class_name in new_classes_names:
+                    #print(f"Processing relationship class: {rel_class_name}")
 
-                        object_match = re.search(r'object:\s*\n([\s\S]*?)(?=\n\s*predicate:)', new_relationship_slot_usage_block, re.DOTALL)
-                        if object_match:
-                            new_object_block = "        " + object_match.group(1).strip()
-                        
+                    old_class = classes_data[rel_class_name]
+                    new_class = new_classes_data[rel_class_name]
 
-                        subject_min_cardinality = extract_class_block_from_schema_UPDATED(subject_block, None, "minimum_cardinality")
-                        if subject_min_cardinality:
-                            subject_min_cardinality = subject_min_cardinality.strip().split()[0]
-                        
-                        subject_max_cardinality = extract_class_block_from_schema_UPDATED(subject_block, None, "maximum_cardinality")
-                        if subject_max_cardinality:
-                            subject_max_cardinality = subject_max_cardinality.strip().split()[0]
-                        
-                        new_subject_min_cardinality = extract_class_block_from_schema_UPDATED(new_subject_block, None, "minimum_cardinality")
-                        if new_subject_min_cardinality:
-                            new_subject_min_cardinality = new_subject_min_cardinality.strip().split()[0]
-                        
-                        new_subject_max_cardinality = extract_class_block_from_schema_UPDATED(new_subject_block, None, "maximum_cardinality")
-                        if new_subject_max_cardinality:
-                            new_subject_max_cardinality = new_subject_max_cardinality.strip().split()[0]
-                        
-                        
-                        if (new_subject_min_cardinality and new_subject_max_cardinality and new_subject_min_cardinality < new_subject_max_cardinality and new_subject_max_cardinality > new_subject_min_cardinality) or new_subject_min_cardinality is None or new_subject_max_cardinality is None:
-                            if subject_min_cardinality and new_subject_min_cardinality and subject_min_cardinality != new_subject_min_cardinality:
-                                subject_block = replace_class_in_schema(subject_block, None, "minimum_cardinality", new_subject_min_cardinality)
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
-                            elif subject_min_cardinality is None and new_subject_min_cardinality is not None:
-                                subject_block = subject_block + "\n        minimum_cardinality: " + new_subject_min_cardinality
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
-                            elif subject_min_cardinality is not None and new_subject_min_cardinality is None:
-                                subject_block = (re.sub(rf'        minimum_cardinality: {subject_min_cardinality}', '', subject_block)).rstrip('\n')
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
-                            
-                            if subject_max_cardinality and new_subject_max_cardinality and subject_max_cardinality != new_subject_max_cardinality:
-                                subject_block = replace_class_in_schema(subject_block, None, "maximum_cardinality", new_subject_max_cardinality)
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
-                            elif subject_max_cardinality is None and new_subject_max_cardinality is not None:
-                                subject_block = subject_block + "\n        maximum_cardinality: " + new_subject_max_cardinality
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
-                            elif subject_max_cardinality is not None and new_subject_max_cardinality is None:
-                                subject_block = (re.sub(rf'        maximum_cardinality: {subject_max_cardinality}', '', subject_block)).rstrip('\n')
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "subject", subject_block)
+                    # Only process if both are Triple
+                    if old_class.get("is_a") != "Triple" and new_class.get("is_a") != "Triple":
+                        continue
 
-                        
-                        object_min_cardinality = extract_class_block_from_schema_UPDATED(object_block, None, "minimum_cardinality")
-                        if object_min_cardinality:
-                            object_min_cardinality = object_min_cardinality.strip().split()[0]
-                        
-                        object_max_cardinality = extract_class_block_from_schema_UPDATED(object_block, None, "maximum_cardinality")
-                        if object_max_cardinality:
-                            object_max_cardinality = object_max_cardinality.strip().split()[0]
-                        
-                        new_object_min_cardinality = extract_class_block_from_schema_UPDATED(new_object_block, None, "minimum_cardinality")
-                        if new_object_min_cardinality:
-                            new_object_min_cardinality = new_object_min_cardinality.strip().split()[0]
-                        
-                        new_object_max_cardinality = extract_class_block_from_schema_UPDATED(new_object_block, None, "maximum_cardinality")
-                        if new_object_max_cardinality:
-                            new_object_max_cardinality = new_object_max_cardinality.strip().split()[0]
-                        
-                        
-                        if (new_object_min_cardinality and new_object_max_cardinality and new_object_min_cardinality < new_object_max_cardinality and new_object_max_cardinality > new_object_min_cardinality) or new_object_min_cardinality is None or new_object_max_cardinality is None:
-                            if object_min_cardinality and new_object_min_cardinality and object_min_cardinality != new_object_min_cardinality:
-                                object_block = replace_class_in_schema(object_block, None, "minimum_cardinality", new_object_min_cardinality)
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                            elif object_min_cardinality is None and new_object_min_cardinality is not None:
-                                object_block = object_block + "\n        minimum_cardinality: " + new_object_min_cardinality
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                            elif object_min_cardinality is not None and new_object_min_cardinality is None:
-                                object_block = (re.sub(rf'        minimum_cardinality: {object_min_cardinality}', '', object_block)).rstrip('\n')
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                            
-                            if object_max_cardinality and new_object_max_cardinality and object_max_cardinality != new_object_max_cardinality:
-                                object_block = replace_class_in_schema(object_block, None, "maximum_cardinality", new_object_max_cardinality)
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                            elif object_max_cardinality is None and new_object_max_cardinality is not None:
-                                object_block = object_block + "\n        maximum_cardinality: " + new_object_max_cardinality
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                            elif object_max_cardinality is not None and new_object_max_cardinality is None:
-                                object_block = (re.sub(rf'        maximum_cardinality: {object_max_cardinality}', '', object_block)).rstrip('\n')
-                                relationship_slot_usage_block = replace_class_in_schema(relationship_slot_usage_block, None, "object", object_block)
-                        
-                        classes_section = replace_class_in_schema(classes_section, element + "Relationship", "slot_usage", relationship_slot_usage_block)
+                    old_slot_usage = old_class.get("slot_usage", {})
+                    new_slot_usage = new_class.get("slot_usage", {})
 
-                updated_final_schema = intro_schema + "\n" + classes_section
+                    for slot_name in ["subject", "object"]:
+                        #print(f"  Processing slot: {slot_name}")
+                        if slot_name in old_slot_usage and slot_name in new_slot_usage:
+                            old_slot = old_slot_usage[slot_name]
+                            new_slot = new_slot_usage[slot_name]
+                            #print(f"    Old slot '{slot_name}':", old_slot)
+                            #print(f"    New slot '{slot_name}':", new_slot)
+
+                            if isinstance(old_slot, dict) and isinstance(new_slot, dict):
+                                # Sync minimum_cardinality
+                                if "minimum_cardinality" in new_slot:
+                                    old_slot["minimum_cardinality"] = new_slot["minimum_cardinality"]
+                                elif "minimum_cardinality" in old_slot and "minimum_cardinality" not in new_slot:
+                                    old_slot.pop("minimum_cardinality", None)
+
+                                # Sync maximum_cardinality
+                                if "maximum_cardinality" in new_slot:
+                                    old_slot["maximum_cardinality"] = new_slot["maximum_cardinality"]
+                                elif "maximum_cardinality" in old_slot and "maximum_cardinality" not in new_slot:
+                                    old_slot.pop("maximum_cardinality", None)
+
+                    # Assign back updated slot_usage
+                    old_class["slot_usage"] = old_slot_usage
+                    classes_data[rel_class_name] = old_class
+
+                # Assign back updated classes to schema
+                current_schema_yaml["classes"] = classes_data
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
             case "FixSubschemaExample":
-                for element in classes:
-                    old_prompt_example = extract_class_block_from_schema_UPDATED(classes_section, element, "prompt.examples")
-                    if old_prompt_example is not None:
-                        old_prompt_example = re.sub(r'>-\s*|\s+', ' ', old_prompt_example).strip()      # it removes >- at the beginning of the string if the value involves multiple lines
-                        old_prompt_example = re.sub(r'^>\s', '', old_prompt_example)                    # it removes possible > from the string
-                        old_prompt_example = re.sub(r'[.,;]+$', '', old_prompt_example.strip())         # it removes the punctuation at the end of the string
+                # Parse current schema YAML
+                current_schema_data = pyyaml.safe_load(current_schema)
+                classes_data = current_schema_data.get("classes", {})
+                associations = [name + "Relationship" for name in associations]
+                #print("Classes to process:", classes)
+                #print("Associations to process:", associations)
 
-                    new_prompt_example = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "prompt.examples")
-                    if new_prompt_example is not None:
-                        if new_prompt_example.count("'") > 1:
-                            new_prompt_example = new_prompt_example[0] + new_prompt_example[1:-1].replace("'", "’") + new_prompt_example[-1]
-                        new_prompt_example = re.sub(r'>-\s*|\s+', ' ', new_prompt_example).strip()      # it removes >- at the beginning of the string if the value involves multiple lines
-                        new_prompt_example = re.sub(r'^>\s', '', new_prompt_example)                    # it removes possible > from the string
-                        new_prompt_example = re.sub(r'[.,;]+$', '', new_prompt_example.strip())
-                    
-                    if new_prompt_example != None:
-                        if old_prompt_example is None or old_prompt_example == "''":
-                            old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element, "annotations")
-                            
-                            class_block = extract_class_block_from_schema_UPDATED(classes_section, element, None)
-                            
-                            if old_annotations_block == "{}":
-                                new_annotations_block = "      prompt.examples: " + new_prompt_example
-                                class_block = class_block.replace("    annotations: {}", "    annotations:\n" + new_annotations_block)
-                            else:
-                                new_annotations_block = old_annotations_block.replace("      prompt.examples: ''", "")
-                                new_annotations_block += "\n      prompt.examples: " + new_prompt_example
-                                class_block = class_block.replace(old_annotations_block, new_annotations_block)
-                            
-                            classes_section = replace_class_in_schema(classes_section, element, None, class_block)
-                        else:
-                            old_prompt_example = "        " + new_prompt_example
-                            classes_section = replace_class_in_schema(classes_section, element, "prompt.examples", old_prompt_example)
-                    else:
-                        classes_section = classes_section
-                    
-                    pattern_remove_prompt_examples = re.compile(r'(\s+range:\s+' + re.escape(element) + r'\s+annotations:\s*)\n?(\s*[^p][^\n]+)*\s*prompt\.examples:.*?(\n\s+[^ ]|$)', re.DOTALL)
-                    classes_section = re.sub(pattern_remove_prompt_examples, r'\1\2', classes_section)
-                
-                for element in associations:
-                    class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", "is_a")
-                    new_schema_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Relationship", "is_a")
-                    if class_is_a_value != "Triple" or new_schema_class_is_a_value != "Triple":
-                        updated_final_schema = intro_schema + "\n" + classes_section
-                        return Response(content=updated_final_schema)
-                    
-                    relationship_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Relationship", None).lstrip('\n')
+                # Load new examples from JSON
+                new_pairs_data = json.loads(new_schema_yaml)  # contains {"pairs": [{"class_or_relationship_name": ..., "examples": ...}, ...]}
+                pairs = new_pairs_data.get("pairs", [])
 
-                    pattern = re.compile(r'^\s{4}annotations:\s*(.*?)(?=^\s{4}\S|\Z)', re.DOTALL | re.MULTILINE)
-                    matches = pattern.findall(relationship_block)
-                    for match in matches:
-                        relationship_annotations_block = match
+                # Update classes examples
+                for mapping in pairs:
+                    #print("Processing mapping:", mapping)
+                    name = mapping.get("class_or_relationship_name")
+                    examples_raw = mapping.get("examples", "").strip()
 
-                    new_relationship_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Relationship", None).lstrip('\n')
-                    matches = pattern.findall(new_relationship_block)
-                    for match in matches:
-                        new_relationship_annotations_block = match
-                    
-                    new_relationship_prompt_examples_value = re.sub(r'^\s*prompt.examples:\s*', '', new_relationship_annotations_block)
-                    
-                    if relationship_annotations_block == "{}":
-                        updated_relationship_annotations_block = replace_class_in_schema(relationship_annotations_block, None, None, new_relationship_annotations_block)
-                    else:
-                        updated_relationship_annotations_block = replace_class_in_schema(relationship_annotations_block, None, "prompt.examples", new_relationship_prompt_examples_value)
-                    
-                    pattern = r'(^\s{4}annotations:\s*)(.*?)(?=\n\s{4}\S|\Z)'
-                    relationship_block = re.sub(pattern, r'\1' + updated_relationship_annotations_block, relationship_block, flags=re.DOTALL | re.MULTILINE)
+                    if not examples_raw:
+                        continue
 
-                    classes_section = replace_class_in_schema(classes_section, element + "Relationship", None, relationship_block)
+                    # Normalize the examples string
+                    examples = ", ".join(sorted(set(examples_raw.split(", "))))
 
-                updated_final_schema = intro_schema + "\n" + classes_section
-                
+                    # Determine if it's a class or a relationship
+                    if name in classes or name in associations:
+                        #print(f"Updating examples for {name}: {examples}")
+                        target_class = classes_data[name]
+
+                        # Ensure annotations exist
+                        if "annotations" not in target_class or target_class["annotations"] is None:
+                            target_class["annotations"] = {}
+
+                        # Overwrite prompt.examples
+                        target_class["annotations"]["prompt.examples"] = examples
+
+                # Assign back updated classes
+                current_schema_data["classes"] = classes_data
+
+                # Convert back to YAML
+                updated_final_schema = pyyaml.dump(current_schema_data, sort_keys=False)
+
             case "FixSubschemaOntology":
-                for element in classes:
-                    old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, element, "id_prefixes")
-                    old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element, "annotations") if extract_class_block_from_schema_UPDATED(classes_section, element, "annotations") is not None else "{}"
+                # Parse current schema YAML
+                classes_data = current_schema_yaml.get("classes", {})
+                associations_with_suffix = [name + "Predicate" for name in associations]
 
-                    new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "annotations") if extract_class_block_from_schema_UPDATED(new_schema_classes_section, element, "annotations") is not None else "{}"
+                # Load new ontology mappings from JSON
+                new_pairs_data = json.loads(new_schema_yaml)  # {"pairs": [{"class_or_relationship_name": ..., "ontologies": ...}, ...]}
+                pairs = new_pairs_data.get("pairs", [])
 
-                    new_annotators_values = extract_class_block_from_schema_UPDATED(new_annotations_block, None, "annotators")
-                    if new_annotators_values is not None:
-                        new_annotators_values = new_annotators_values.lstrip('\n').rstrip('\n')
-                        new_annotators_values = ', '.join(line.strip('- ').strip() for line in new_annotators_values.splitlines() if line.strip())
-                        
-                        new_annotators_list = new_annotators_values.split(", ")
-                        
-                        new_list_id_prefixes = [item.replace("sqlite:obo:", "").upper() for item in new_annotators_list]
-                    else:
-                        new_list_id_prefixes = []
-                    
-                    if len(new_list_id_prefixes) == 0:
-                        updated_id_prefixes_block = "{}"
-                    else:
-                        updated_id_prefixes_block = ""
-                    
-                    for item in new_list_id_prefixes:
-                        updated_id_prefixes_block += "\n      - " + item
-                    
-                    if old_annotations_block == "{}" and new_annotators_values is not None:
-                        old_annotations_block = old_annotations_block.replace("{}", "\n      annotators: {}")
-                    if old_annotations_block != "{}":           # if the condition is true, it means that {} has ben replaced by the previous if block or that old_annotations_block value was already different from {}
-                        classes_section = replace_class_in_schema(classes_section, element, "id_prefixes", updated_id_prefixes_block)
-                        old_annotations_block = replace_class_in_schema(old_annotations_block, None, "annotators", new_annotators_values)
-                        classes_section = replace_class_in_schema(classes_section, element, "annotations", old_annotations_block)
+                for mapping in pairs:
+                    print("Processing mapping:", mapping)
+                    name = mapping.get("class_or_relationship_name")
+                    ontologies_raw = mapping.get("ontologies", "").strip()
 
-                for element in associations:
-                    # the following code checks if class named as element[0] + "Predicate" is a RelationshipType
-                    class_is_a_value = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "is_a").strip()
-                    new_schema_class_is_a_value = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "is_a").strip()
-                    if class_is_a_value != "RelationshipType" or new_schema_class_is_a_value != "RelationshipType":
-                        updated_final_schema = intro_schema + "\n" + classes_section
-                        return Response(content=updated_final_schema)
-                    
-                    old_id_prefixes_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "id_prefixes")
-                    old_annotations_block = extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "annotations") if extract_class_block_from_schema_UPDATED(classes_section, element + "Predicate", "annotations") is not None else "{}"
-                    
-                    new_annotations_block = extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "annotations") if extract_class_block_from_schema_UPDATED(new_schema_classes_section, element + "Predicate", "annotations") is not None else "{}"
+                    if not ontologies_raw:
+                        continue
 
-                    new_annotators_values = extract_class_block_from_schema_UPDATED(new_annotations_block, None, "annotators")
-                    if new_annotators_values is not None:
-                        new_annotators_values = new_annotators_values.lstrip('\n').rstrip('\n')
-                        new_annotators_values = ', '.join(line.strip('- ').strip() for line in new_annotators_values.splitlines() if line.strip())
+                    # Normalize ontologies list
+                    ontologies_list = sorted(set([o.strip() for o in ontologies_raw.split(", ") if o.strip()]))
 
-                        new_annotators_list = new_annotators_values.split(", ")
-                        
-                        new_list_id_prefixes = [item.replace("sqlite:obo:", "").upper() for item in new_annotators_list]
-                    else:
-                        new_list_id_prefixes = []
-                    
-                    if len(new_list_id_prefixes) == 0:
-                        updated_id_prefixes_block = "{}"
-                    else:
-                        updated_id_prefixes_block = ""
-                    
-                    for item in new_list_id_prefixes:
-                        updated_id_prefixes_block += "\n      - " + item
-                    
-                    if old_annotations_block == "{}" and new_annotators_values is not None:
-                        old_annotations_block = old_annotations_block.replace("{}", "\n      annotators: {}")
-                    if old_annotations_block != "{}":           # if the condition is true, it means that {} has ben replaced by the previous if block or that old_annotations_block value was already different from {}
-                        classes_section = replace_class_in_schema(classes_section, element + "Predicate", "id_prefixes", updated_id_prefixes_block)
-                        old_annotations_block = replace_class_in_schema(old_annotations_block, None, "annotators", new_annotators_values)
-                        classes_section = replace_class_in_schema(classes_section, element + "Predicate", "annotations", old_annotations_block)
-                
-                updated_final_schema = intro_schema + "\n" + classes_section
+                    if name in classes or name in associations_with_suffix:
+                        target_class = classes_data[name]
+                        #print(f"Updating ontologies for {name}: {ontologies_list}")
+                        if "annotations" not in target_class or target_class["annotations"] is None:
+                            target_class["annotations"] = {}
+                        print(f"Updating annotators for {name}: {ontologies_list}")
+                        print(f"Old annotators:", target_class["annotations"].get("annotators"))
+                        target_class["annotations"]["annotators"] = ", ".join(ontologies_list)
+                        print(f"New annotators:", target_class["annotations"].get("annotators"))
+
+                current_schema_yaml["classes"] = classes_data
+
+                # Convert back to YAML
+                updated_final_schema = pyyaml.dump(current_schema_yaml, sort_keys=False)
 
 
         # the following code is a fix to ensure that 'prompt.examples' is always defined as a YAML multiline block, even when there are no examples, by adding a default text to prevent errors.

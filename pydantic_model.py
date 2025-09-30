@@ -61,214 +61,195 @@ class LinkMLMeta(RootModel):
         return key in self.root
 
 
-linkml_meta = LinkMLMeta({'default_prefix': 'https://schemalink.biodata.di.unimi.it/untitled_schema/',
+linkml_meta = LinkMLMeta({'default_prefix': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/',
      'default_range': 'string',
      'description': '',
-     'id': 'https://schemalink.biodata.di.unimi.it/untitled_schema',
-     'imports': ['ontogpt:core', 'linkml:types'],
-     'name': 'untitled_schema',
-     'prefixes': {'linkml': {'prefix_prefix': 'linkml',
+     'id': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema',
+     'imports': ['linkml:types'],
+     'license': 'https://creativecommons.org/publicdomain/zero/1.0/',
+     'name': 'archaeological_excavation_schema',
+     'prefixes': {'ADO': {'prefix_prefix': 'ADO',
+                          'prefix_reference': 'http://purl.obolibrary.org/obo/ado.owl'},
+                  'BFO': {'prefix_prefix': 'BFO',
+                          'prefix_reference': 'http://purl.obolibrary.org/obo/bfo.owl'},
+                  'SO': {'prefix_prefix': 'SO',
+                         'prefix_reference': 'http://purl.obolibrary.org/obo/so.owl'},
+                  'linkml': {'prefix_prefix': 'linkml',
                              'prefix_reference': 'https://w3id.org/linkml/'},
-                  'ontogpt': {'prefix_prefix': 'ontogpt',
-                              'prefix_reference': 'http://w3id.org/ontogpt/'},
                   'rdf': {'prefix_prefix': 'rdf',
-                          'prefix_reference': 'https://www.w3.org/1999/02/22-rdf-syntax-ns'}},
-     'title': 'Untitled schema'} )
-
-class NullDataOptions(str, Enum):
-    UNSPECIFIED_METHOD_OF_ADMINISTRATION = "UNSPECIFIED_METHOD_OF_ADMINISTRATION"
-    NOT_APPLICABLE = "NOT_APPLICABLE"
-    NOT_MENTIONED = "NOT_MENTIONED"
+                          'prefix_reference': 'https://www.w3.org/1999/02/22-rdf-syntax-ns#'},
+                  'rdfs': {'prefix_prefix': 'rdfs',
+                           'prefix_reference': 'http://www.w3.org/2000/01/rdf-schema#'}},
+     'title': 'Archaeological Excavation Schema'} )
 
 
+class Node(ConfiguredBaseModel):
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'abstract': True,
+         'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema'})
 
-class ExtractionResult(ConfiguredBaseModel):
+    id: str = Field(default=..., json_schema_extra = { "linkml_meta": {'alias': 'id', 'domain_of': ['Node']} })
+    name: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'name', 'domain_of': ['Node'], 'slot_uri': 'rdfs:label'} })
+    category: Literal["Node"] = Field(default="Node", json_schema_extra = { "linkml_meta": {'alias': 'category',
+         'designates_type': True,
+         'domain_of': ['Node'],
+         'slot_uri': 'rdf:type'} })
+    types: Optional[list[str]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'types', 'domain_of': ['Node']} })
+
+
+class Edge(ConfiguredBaseModel):
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'abstract': True,
+         'class_uri': 'rdf:Statement',
+         'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema'})
+
+    subject: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'subject', 'domain_of': ['Edge'], 'slot_uri': 'rdf:subject'} })
+    predicate: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/Edge","https://www.w3.org/1999/02/22-rdf-syntax-ns#Statement","rdf:Statement"] = Field(default="rdf:Statement", json_schema_extra = { "linkml_meta": {'alias': 'predicate',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:predicate'} })
+    object: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object', 'domain_of': ['Edge'], 'slot_uri': 'rdf:object'} })
+    type: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/Edge","https://www.w3.org/1999/02/22-rdf-syntax-ns#Statement","rdf:Statement"] = Field(default="rdf:Statement", json_schema_extra = { "linkml_meta": {'alias': 'type',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:type'} })
+
+
+class Graphs(ConfiguredBaseModel):
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema'})
+
+    nodes: Optional[list[Union[Node,Archaeologicalexcavation,Archaeologicalassessment]]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'nodes', 'domain_of': ['Graphs']} })
+    edges: Optional[list[Union[Edge,ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge,ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship]]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'edges', 'domain_of': ['Graphs']} })
+
+
+class ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge(Edge):
     """
-    A result of extracting knowledge on text
+    A relationship of type \"excavation assesses\" from Archaeologicalexcavation to Archaeologicalassessment.
     """
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core'})
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'annotations': {'annotators': {'tag': 'annotators', 'value': 'sqlite:obo:so'}},
+         'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema',
+         'slot_usage': {'predicate': {'equals_string': 'excavation assesses',
+                                      'name': 'predicate'}}})
 
-    input_id: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'input_id', 'domain_of': ['ExtractionResult']} })
-    input_title: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'input_title', 'domain_of': ['ExtractionResult']} })
-    input_text: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'input_text', 'domain_of': ['ExtractionResult']} })
-    raw_completion_output: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'raw_completion_output', 'domain_of': ['ExtractionResult']} })
-    prompt: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'prompt', 'domain_of': ['ExtractionResult']} })
-    extracted_object: Optional[Any] = Field(default=None, description="""The complex objects extracted from the text""", json_schema_extra = { "linkml_meta": {'alias': 'extracted_object', 'domain_of': ['ExtractionResult']} })
-    named_entities: Optional[list[Any]] = Field(default=None, description="""Named entities extracted from the text""", json_schema_extra = { "linkml_meta": {'alias': 'named_entities', 'domain_of': ['ExtractionResult']} })
-
-
-class NamedEntity(ConfiguredBaseModel):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'abstract': True, 'from_schema': 'http://w3id.org/ontogpt/core'})
-
-    id: str = Field(default=..., description="""A unique identifier for the named entity""", json_schema_extra = { "linkml_meta": {'alias': 'id',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['this is populated during the grounding and normalization step'],
-         'domain_of': ['NamedEntity', 'Publication']} })
-    label: Optional[str] = Field(default=None, description="""The label (name) of the named thing""", json_schema_extra = { "linkml_meta": {'alias': 'label',
-         'aliases': ['name'],
-         'annotations': {'owl': {'tag': 'owl',
-                                 'value': 'AnnotationProperty, AnnotationAssertion'}},
-         'domain_of': ['NamedEntity'],
-         'slot_uri': 'rdfs:label'} })
-    original_spans: Optional[list[str]] = Field(default=None, description="""The coordinates of the original text span from which the named entity was extracted, inclusive. For example, \"10:25\" means the span starting from the 10th character and ending with the 25th character. The first character in the text has index 0. Newlines are treated as single characters. Multivalued as there may be multiple spans for a single text.""", json_schema_extra = { "linkml_meta": {'alias': 'original_spans',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['This is determined during grounding and normalization',
-                      'But is based on the full input text'],
-         'domain_of': ['NamedEntity']} })
-
-    @field_validator('original_spans')
-    def pattern_original_spans(cls, v):
-        pattern=re.compile(r"^\d+:\d+$")
-        if isinstance(v, list):
-            for element in v:
-                if isinstance(element, str) and not pattern.match(element):
-                    err_msg = f"Invalid original_spans format: {element}"
-                    raise ValueError(err_msg)
-        elif isinstance(v, str) and not pattern.match(v):
-            err_msg = f"Invalid original_spans format: {v}"
-            raise ValueError(err_msg)
-        return v
+    attribute_numer_one: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'attribute_numer_one',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    attribute_number_two: Optional[list[date]] = Field(default=None, description="""sadgbd""", json_schema_extra = { "linkml_meta": {'alias': 'attribute_number_two',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    attibute_three: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'attibute_three',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    subject: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'subject', 'domain_of': ['Edge'], 'slot_uri': 'rdf:subject'} })
+    predicate: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge"] = Field(default="https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge", json_schema_extra = { "linkml_meta": {'alias': 'predicate',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'equals_string': 'excavation assesses',
+         'slot_uri': 'rdf:predicate'} })
+    object: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object', 'domain_of': ['Edge'], 'slot_uri': 'rdf:object'} })
+    type: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge"] = Field(default="https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge", json_schema_extra = { "linkml_meta": {'alias': 'type',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:type'} })
 
 
-class CompoundExpression(ConfiguredBaseModel):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'abstract': True, 'from_schema': 'http://w3id.org/ontogpt/core'})
-
-    pass
-
-
-class Triple(CompoundExpression):
+class ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship(ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge):
     """
-    Abstract parent for Relation Extraction tasks
+    A relationship where the subject is a Archaeologicalexcavation and where the object is a Archaeologicalassessment. A triple where the subject is a Excavation and where the object is a Assessment.
     """
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'abstract': True, 'from_schema': 'http://w3id.org/ontogpt/core'})
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'annotations': {'prompt.examples': {'tag': 'prompt.examples',
+                                             'value': 'test1, test2'}},
+         'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema',
+         'slot_usage': {'object': {'annotations': {'prompt.examples': {'tag': 'prompt.examples',
+                                                                       'value': ''}},
+                                   'maximum_cardinality': 2,
+                                   'minimum_cardinality': 0,
+                                   'name': 'object',
+                                   'range': 'Archaeologicalassessment'},
+                        'subject': {'annotations': {'prompt.examples': {'tag': 'prompt.examples',
+                                                                        'value': ''}},
+                                    'maximum_cardinality': 2,
+                                    'minimum_cardinality': 1,
+                                    'name': 'subject',
+                                    'range': 'Archaeologicalexcavation'}}})
 
-    subject: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'subject', 'domain_of': ['Triple']} })
-    predicate: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'predicate', 'domain_of': ['Triple']} })
-    object: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object', 'domain_of': ['Triple']} })
-    qualifier: Optional[str] = Field(default=None, description="""A qualifier for the statements, e.g. \"NOT\" for negation""", json_schema_extra = { "linkml_meta": {'alias': 'qualifier', 'domain_of': ['Triple']} })
-    subject_qualifier: Optional[str] = Field(default=None, description="""An optional qualifier or modifier for the subject of the statement, e.g. \"high dose\" or \"intravenously administered\"""", json_schema_extra = { "linkml_meta": {'alias': 'subject_qualifier', 'domain_of': ['Triple']} })
-    object_qualifier: Optional[str] = Field(default=None, description="""An optional qualifier or modifier for the object of the statement, e.g. \"severe\" or \"with additional complications\"""", json_schema_extra = { "linkml_meta": {'alias': 'object_qualifier', 'domain_of': ['Triple']} })
+    attribute_numer_one: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'attribute_numer_one',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    attribute_number_two: Optional[list[date]] = Field(default=None, description="""sadgbd""", json_schema_extra = { "linkml_meta": {'alias': 'attribute_number_two',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    attibute_three: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'attibute_three',
+         'domain_of': ['ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge']} })
+    subject: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'subject',
+         'annotations': {'prompt.examples': {'tag': 'prompt.examples', 'value': ''}},
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:subject'} })
+    predicate: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship"] = Field(default="https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship", json_schema_extra = { "linkml_meta": {'alias': 'predicate',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'equals_string': 'excavation assesses',
+         'slot_uri': 'rdf:predicate'} })
+    object: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object',
+         'annotations': {'prompt.examples': {'tag': 'prompt.examples', 'value': ''}},
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:object'} })
+    type: Literal["https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship"] = Field(default="https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema/ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship", json_schema_extra = { "linkml_meta": {'alias': 'type',
+         'designates_type': True,
+         'domain_of': ['Edge'],
+         'slot_uri': 'rdf:type'} })
 
 
-class TextWithTriples(ConfiguredBaseModel):
+class Archaeologicalexcavation(Node):
     """
-    A text containing one or more relations of the Triple type.
+    Represents an archaeological excavation event.
     """
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core'})
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'annotations': {'annotators': {'tag': 'annotators',
+                                        'value': 'sqlite:obo:ado'}},
+         'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema',
+         'id_prefixes': ['ADO']})
 
-    publication: Optional[Publication] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'publication',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'domain_of': ['TextWithTriples', 'TextWithEntity']} })
-    triples: Optional[list[Triple]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'triples', 'domain_of': ['TextWithTriples']} })
+    excavation_id: str = Field(default=..., description="""Unique identifier for the excavation.""", json_schema_extra = { "linkml_meta": {'alias': 'excavation_id', 'domain_of': ['Archaeologicalexcavation']} })
+    location: Optional[str] = Field(default=None, description="""The city where the excavation took place.""", json_schema_extra = { "linkml_meta": {'alias': 'location',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    date: Optional[date] = Field(default=None, description="""The date when the excavation occurred.""", json_schema_extra = { "linkml_meta": {'alias': 'date',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    description: Optional[str] = Field(default=None, description="""A detailed description of the excavation.""", json_schema_extra = { "linkml_meta": {'alias': 'description',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    findings: Optional[list[str]] = Field(default=None, description="""List of findings from the excavation.""", json_schema_extra = { "linkml_meta": {'alias': 'findings',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    id: str = Field(default=..., json_schema_extra = { "linkml_meta": {'alias': 'id', 'domain_of': ['Node']} })
+    name: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'name', 'domain_of': ['Node'], 'slot_uri': 'rdfs:label'} })
+    category: Literal["Archaeologicalexcavation"] = Field(default="Archaeologicalexcavation", json_schema_extra = { "linkml_meta": {'alias': 'category',
+         'designates_type': True,
+         'domain_of': ['Node'],
+         'slot_uri': 'rdf:type'} })
+    types: Optional[list[str]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'types', 'domain_of': ['Node']} })
 
 
-class TextWithEntity(ConfiguredBaseModel):
+class Archaeologicalassessment(Node):
     """
-    A text containing one or more instances of a single type of entity.
+    Represents an archaeological survey event, typically conducted to assess the potential for excavation.
     """
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core'})
+    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'https://schemalink.biodata.di.unimi.it/archaeological_excavation_schema'})
 
-    publication: Optional[Publication] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'publication',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'domain_of': ['TextWithTriples', 'TextWithEntity']} })
-    entities: Optional[list[str]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'entities', 'domain_of': ['TextWithEntity']} })
-
-
-class RelationshipType(NamedEntity):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core',
-         'id_prefixes': ['RO', 'biolink']})
-
-    id: str = Field(default=..., description="""A unique identifier for the named entity""", json_schema_extra = { "linkml_meta": {'alias': 'id',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['this is populated during the grounding and normalization step'],
-         'domain_of': ['NamedEntity', 'Publication']} })
-    label: Optional[str] = Field(default=None, description="""The label (name) of the named thing""", json_schema_extra = { "linkml_meta": {'alias': 'label',
-         'aliases': ['name'],
-         'annotations': {'owl': {'tag': 'owl',
-                                 'value': 'AnnotationProperty, AnnotationAssertion'}},
-         'domain_of': ['NamedEntity'],
-         'slot_uri': 'rdfs:label'} })
-    original_spans: Optional[list[str]] = Field(default=None, description="""The coordinates of the original text span from which the named entity was extracted, inclusive. For example, \"10:25\" means the span starting from the 10th character and ending with the 25th character. The first character in the text has index 0. Newlines are treated as single characters. Multivalued as there may be multiple spans for a single text.""", json_schema_extra = { "linkml_meta": {'alias': 'original_spans',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['This is determined during grounding and normalization',
-                      'But is based on the full input text'],
-         'domain_of': ['NamedEntity']} })
-
-    @field_validator('original_spans')
-    def pattern_original_spans(cls, v):
-        pattern=re.compile(r"^\d+:\d+$")
-        if isinstance(v, list):
-            for element in v:
-                if isinstance(element, str) and not pattern.match(element):
-                    err_msg = f"Invalid original_spans format: {element}"
-                    raise ValueError(err_msg)
-        elif isinstance(v, str) and not pattern.match(v):
-            err_msg = f"Invalid original_spans format: {v}"
-            raise ValueError(err_msg)
-        return v
-
-
-class Publication(ConfiguredBaseModel):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core'})
-
-    id: Optional[str] = Field(default=None, description="""The publication identifier""", json_schema_extra = { "linkml_meta": {'alias': 'id', 'domain_of': ['NamedEntity', 'Publication']} })
-    title: Optional[str] = Field(default=None, description="""The title of the publication""", json_schema_extra = { "linkml_meta": {'alias': 'title', 'domain_of': ['Publication']} })
-    abstract: Optional[str] = Field(default=None, description="""The abstract of the publication""", json_schema_extra = { "linkml_meta": {'alias': 'abstract', 'domain_of': ['Publication']} })
-    combined_text: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'combined_text', 'domain_of': ['Publication']} })
-    full_text: Optional[str] = Field(default=None, description="""The full text of the publication""", json_schema_extra = { "linkml_meta": {'alias': 'full_text', 'domain_of': ['Publication']} })
-
-
-class AnnotatorResult(ConfiguredBaseModel):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'http://w3id.org/ontogpt/core'})
-
-    subject_text: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'subject_text', 'domain_of': ['AnnotatorResult']} })
-    object_id: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object_id', 'domain_of': ['AnnotatorResult']} })
-    object_text: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'object_text', 'domain_of': ['AnnotatorResult']} })
-
-
-class Aa(NamedEntity):
-    linkml_meta: ClassVar[LinkMLMeta] = LinkMLMeta({'from_schema': 'https://schemalink.biodata.di.unimi.it/untitled_schema'})
-
-    aa_id: str = Field(default=..., description="""A unique identifier for the Aa class.""", json_schema_extra = { "linkml_meta": {'alias': 'aa_id', 'domain_of': ['Aa']} })
-    id: str = Field(default=..., description="""A unique identifier for the named entity""", json_schema_extra = { "linkml_meta": {'alias': 'id',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['this is populated during the grounding and normalization step'],
-         'domain_of': ['NamedEntity', 'Publication']} })
-    label: Optional[str] = Field(default=None, description="""The label (name) of the named thing""", json_schema_extra = { "linkml_meta": {'alias': 'label',
-         'aliases': ['name'],
-         'annotations': {'owl': {'tag': 'owl',
-                                 'value': 'AnnotationProperty, AnnotationAssertion'}},
-         'domain_of': ['NamedEntity'],
-         'slot_uri': 'rdfs:label'} })
-    original_spans: Optional[list[str]] = Field(default=None, description="""The coordinates of the original text span from which the named entity was extracted, inclusive. For example, \"10:25\" means the span starting from the 10th character and ending with the 25th character. The first character in the text has index 0. Newlines are treated as single characters. Multivalued as there may be multiple spans for a single text.""", json_schema_extra = { "linkml_meta": {'alias': 'original_spans',
-         'annotations': {'prompt.skip': {'tag': 'prompt.skip', 'value': 'true'}},
-         'comments': ['This is determined during grounding and normalization',
-                      'But is based on the full input text'],
-         'domain_of': ['NamedEntity']} })
-
-    @field_validator('original_spans')
-    def pattern_original_spans(cls, v):
-        pattern=re.compile(r"^\d+:\d+$")
-        if isinstance(v, list):
-            for element in v:
-                if isinstance(element, str) and not pattern.match(element):
-                    err_msg = f"Invalid original_spans format: {element}"
-                    raise ValueError(err_msg)
-        elif isinstance(v, str) and not pattern.match(v):
-            err_msg = f"Invalid original_spans format: {v}"
-            raise ValueError(err_msg)
-        return v
+    survey_id: str = Field(default=..., description="""Unique identifier for the survey.""", json_schema_extra = { "linkml_meta": {'alias': 'survey_id', 'domain_of': ['Archaeologicalassessment']} })
+    location: Optional[str] = Field(default=None, description="""The area where the survey was conducted.""", json_schema_extra = { "linkml_meta": {'alias': 'location',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    date: Optional[date] = Field(default=None, description="""The date when the survey occurred.""", json_schema_extra = { "linkml_meta": {'alias': 'date',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    description: Optional[str] = Field(default=None, description="""A detailed description of the survey.""", json_schema_extra = { "linkml_meta": {'alias': 'description',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    findings: Optional[list[str]] = Field(default=None, description="""List of findings from the survey.""", json_schema_extra = { "linkml_meta": {'alias': 'findings',
+         'domain_of': ['Archaeologicalexcavation', 'Archaeologicalassessment']} })
+    id: str = Field(default=..., json_schema_extra = { "linkml_meta": {'alias': 'id', 'domain_of': ['Node']} })
+    name: Optional[str] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'name', 'domain_of': ['Node'], 'slot_uri': 'rdfs:label'} })
+    category: Literal["Archaeologicalassessment"] = Field(default="Archaeologicalassessment", json_schema_extra = { "linkml_meta": {'alias': 'category',
+         'designates_type': True,
+         'domain_of': ['Node'],
+         'slot_uri': 'rdf:type'} })
+    types: Optional[list[str]] = Field(default=None, json_schema_extra = { "linkml_meta": {'alias': 'types', 'domain_of': ['Node']} })
 
 
 # Model rebuild
 # see https://pydantic-docs.helpmanual.io/usage/models/#rebuilding-a-model
-ExtractionResult.model_rebuild()
-NamedEntity.model_rebuild()
-CompoundExpression.model_rebuild()
-Triple.model_rebuild()
-TextWithTriples.model_rebuild()
-TextWithEntity.model_rebuild()
-RelationshipType.model_rebuild()
-Publication.model_rebuild()
-AnnotatorResult.model_rebuild()
-Aa.model_rebuild()
+Node.model_rebuild()
+Edge.model_rebuild()
+Graphs.model_rebuild()
+ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentEdge.model_rebuild()
+ArchaeologicalexcavationExcavationAssessesArchaeologicalassessmentRelationship.model_rebuild()
+Archaeologicalexcavation.model_rebuild()
+Archaeologicalassessment.model_rebuild()
