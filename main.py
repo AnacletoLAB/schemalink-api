@@ -28,6 +28,8 @@ from typing import Optional
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from ontologies.ontologies import router as ontologies_router, refresh_all as refresh_ontologies, refresh_state, background_refresh
+from ontologies.cache import is_empty
 from expire_subscriptions_job import expire_subscriptions_job
 import chromadb
 import re
@@ -137,6 +139,9 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Mount ontologies router under /api
+app.include_router(ontologies_router, prefix="/api")
 
 
 # Register a User
@@ -1046,16 +1051,57 @@ async def average_latency_by_policy(db=Depends(get_db)):
 
 scheduler = BackgroundScheduler()
 
-# Start the listener during the app's startup in FastAPI and set up the scheduler
+
+def nightly_refresh_job():
+    """Nightly ontology refresh job that runs at midnight."""
+    import logging
+    logger = logging.getLogger("uvicorn.nightly")
+    
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    
+    if loop and loop.is_running():
+        async def check_and_start():
+            if not await refresh_state.is_in_progress():
+                logger.info("🌙 Nightly ontologies refresh triggered")
+                async with refresh_state._lock:
+                    refresh_state.in_progress = True
+                    refresh_state.last_started = datetime.now()
+                await background_refresh()
+            else:
+                logger.warning("⚠️ Nightly refresh skipped - already in progress")
+        
+        asyncio.run_coroutine_threadsafe(check_and_start(), loop)
+    else:
+        logger.info("🌙 Nightly ontologies refresh triggered (sync mode)")
+        asyncio.run(refresh_ontologies(force=False))
+
+
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(listen_notifications()) # Start the listener in parallel
+    asyncio.create_task(listen_notifications())
+    
+    cache_empty = await is_empty()
+    
+    if cache_empty:
+        print("🆕 First start detected - populating ontologies cache (this will take 1-2 minutes)")
+        try:
+            await refresh_ontologies(blocking=True)
+        except Exception as e:
+            print(f"❌ Failed to populate cache on first start: {e}")
+    else:
+        print("✅ Ontologies cache loaded from disk - API ready")
+        if not await refresh_state.is_in_progress():
+            print("   ↳ Starting background refresh to update cache...")
+            async with refresh_state._lock:
+                refresh_state.in_progress = True
+                refresh_state.last_started = datetime.now()
+            asyncio.create_task(background_refresh())
 
-    scheduler.add_job(
-        expire_subscriptions_job,
-        CronTrigger(minute='*/5')
-    )
-
+    scheduler.add_job(expire_subscriptions_job, CronTrigger(minute='*/5'))
+    scheduler.add_job(nightly_refresh_job, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
 @app.on_event("shutdown")
