@@ -1,24 +1,63 @@
-# Pydantic
+# [SchemaLink](https://schemalink.biodata.di.unimi.it/)
+
+<img src="./apps/arrows-ts/public/arrows_logo.svg" alt="SchemaLink logo" width="300" />
+
+Web-based tool for drawing schemas.
+
 
 ## Run locally
 
-1. Install requirements:
+1. Git clone/Download and unzip [​schemalink-webapp](https://github.com/AnacletoLAB/schemalink-webapp)​ and [​schemalink-api](https://github.com/AnacletoLAB/schemalink-api)​.
 
-   ```shell
-   pip install -r requirements.txt
-   ```
+2. Install and start postgres on port 5432. For instance, on MacOS:
+    - brew install postgresql
+    - brew services start postgresql
+    - dropdb Authentication
+    - createdb Authentication
+    - psql -d Authentication -f schemalink-api/authentication_database.sql
+    - createuser -s postgres 
+    - psql -d postgres
+    - ALTER USER postgres WITH password 'unimi'; 
+    - \q
+    
+    Note: Ensure postgres runs on port 5432 (check that the port is free).
 
-2. If you plan on using the openapi features, set the required environment
-   variables:
+3. Install and start ChromaDB. For instance, on MacOS:
+    - brew install sqlite3
+    - pip install -r schemalink-api/requirements.txt
+    - sqlite3 schemalink-api/chroma_data/chroma.sqlite3 < schemalink-api/vector_store.sql
+    - chroma run --port 8001 --path schemalink-api/chroma_data
+    
+    Note: Ensure postgres runs on port 8001 (check that the port is free).
+    
+4. Open a new shell tab, and start the API:
+    - cd schemalink-api
+    - If you want to exploit intelligent operations:
+        - nano .env
+        - OPENAI_API_KEY=your-openai-api-key
+    - If you want to exploit gmail-based functionalities:
+        - nano .env
+        - ADMIN_EMAIL=your-gmail@gmail.com
+        - EMAIL_PASSWORD=your-gmail-app-password (can be generated at: https://myaccount.google.com/apppasswords)
+    - fastapi dev main.py
+    
+    Note: Ensure the API runs on port 8000 (check that the port is free).
+    
+5. Open a new shell tab, and start the webapp:
+    - cd schemalink-webapp
+    - npm install
+    - npm audit fix
+    - npx nx serve arrows-ts
+    
+    Note: Ensure the webapp runs on port 4200 (check that the port is free). 
+    
+6. Log-in webapp (browser --> localhost:4200) with admin credentials (can be edited): usr="schemalink"; pwd="Admin123!". Edit admin e-mail to exploit gmail-based functionalities. 
 
-   ```shell
-   export OPENAI_API_KEY=sk-proj-0123456789ABCDEF
-   export OPENAI_THREAD_ID=thread_0123456789ABCDEF
-   export OPENAI_ASSISTANT_ID=asst_0123456789ABCDEF
-   ```
 
-3. Run the application:
+## Issues and Feedback
 
-   ```shell
-   fastapi dev main.py
-   ```
+To report a problem that needs fixing, please create an
+[issue](https://github.com/AnacletoLAB/schemalink-api/issues).
+
+For suggestions and feedback, please start a
+[discussion](https://github.com/AnacletoLAB/schemalink-api/discussions).
