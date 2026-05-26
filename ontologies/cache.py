@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pickle
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Any, AsyncIterator
@@ -20,12 +21,43 @@ logger = logging.getLogger("uvicorn.ontologies.cache")
 logger.setLevel(logging.INFO)
 
 CACHE_FILE_NEW = CACHE_FILE.with_suffix('.new.json')
+ONTOLOGIES_DICT_PKL_FILE = CACHE_FILE.with_name("ontologies_dict.pkl")
 _lock = asyncio.Lock()
+
+
+def build_ontologies_dict(
+    json_path: str | Path = CACHE_FILE,
+    pkl_path: str | Path | None = ONTOLOGIES_DICT_PKL_FILE,
+) -> dict[str, dict]:
+    """Build dictionary keyed by ontology ID and optionally persist it as pickle."""
+    json_path = Path(json_path)
+
+    with json_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    ontologies_list = data.get("ontologies", []) if isinstance(data, dict) else []
+    ontologies_dict = {
+        ontology["id"]: ontology
+        for ontology in ontologies_list
+        if isinstance(ontology, dict) and "id" in ontology
+    }
+
+    if pkl_path is not None:
+        pkl_path = Path(pkl_path)
+        pkl_path.parent.mkdir(parents=True, exist_ok=True)
+        with pkl_path.open("wb") as f:
+            pickle.dump(ontologies_dict, f)
+        logger.info(f"Updated ontology dictionary pickle: {pkl_path}")
+
+    return ontologies_dict
 
 
 def _ensure_file() -> None:
     if not CACHE_FILE.exists():
         CACHE_FILE.write_text(json.dumps({"ontologies": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+        build_ontologies_dict()
+    elif not ONTOLOGIES_DICT_PKL_FILE.exists():
+        build_ontologies_dict()
 
 
 def _unwrap(data: Any) -> List[Dict[str, Any]]:
@@ -89,6 +121,7 @@ async def atomic_update(new_ontologies: List[Dict[str, Any]]) -> None:
                 json.dump(_wrap(cleaned), fp, ensure_ascii=False, indent=2)
             
             CACHE_FILE_NEW.replace(CACHE_FILE)
+            build_ontologies_dict()
             
         except Exception as e:
             logger.error(f"Cache update failed: {e}")
@@ -122,6 +155,7 @@ async def locked_cache() -> AsyncIterator[Dict[str, Dict[str, Any]]]:
     try:
         if not CACHE_FILE.exists():
             CACHE_FILE.write_text(json.dumps({"ontologies": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+            build_ontologies_dict()
         with CACHE_FILE.open(encoding="utf-8") as fp:
             raw = json.load(fp)
         items = _unwrap(raw)
@@ -149,6 +183,7 @@ async def locked_cache() -> AsyncIterator[Dict[str, Dict[str, Any]]]:
         if new_snapshot != original_snapshot:
             with CACHE_FILE.open("w", encoding="utf-8") as fp:
                 json.dump(_wrap(new_snapshot), fp, ensure_ascii=False, indent=2)
+            build_ontologies_dict()
     finally:
         _lock.release()
 

@@ -9,7 +9,7 @@ from linkml.linter.formatters import JsonFormatter
 from linkml_runtime.linkml_model.meta import SchemaDefinition
 from openai import OpenAI, OpenAIError, APIError, RateLimitError
 from pydantic import BaseModel, Field
-from typing import List, Annotated
+from typing import List, Dict, Any, Annotated
 from database import SessionLocal, engine
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -36,6 +36,11 @@ import re
 import openai
 import json
 import Levenshtein
+from registry_utils import load_json_file, save_json_file, is_admin, save_custom_ontologies, load_and_modify_custom_ontologies, update_cache_with_custom_ontology
+from ontologies.service import load_custom_ontologies
+#from linkml_translator_aldyiar import translate_linkml_oo
+from linkml_translator import translate_linkml_oo
+from export_algorithm import convert_internal_representation_to_yaml, dump_yaml_schema
 
 local_tz = pytz.timezone("Europe/Rome")
 
@@ -119,6 +124,44 @@ class ContributeRequest(BaseModel):
     username: str
     diagramName: str
     graphJson: str
+
+class EnumCreateRequest(BaseModel):
+    name: str
+    permissible_values: List[str]
+
+class EnumUpdateRequest(BaseModel):
+    permissible_values: List[str]
+
+class RegexCreateRequest(BaseModel):
+    name: str
+    expression: str
+
+class RegexUpdateRequest(BaseModel):
+    expression: str
+
+class CustomOntologyCreateRequest(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    namespace: str = ""
+    annotator: str = ""
+    properties: List[str] = []
+    terms: List[str] = []
+
+class CustomOntologyUpdateRequest(BaseModel):
+    name: str
+    description: str = ""
+    namespace: str = ""
+    annotator: str = ""
+    properties: List[str] = []
+    terms: List[str] = []
+
+class LinkMLOOTranslateRequest(BaseModel):
+    yaml_content: str = Field(..., description="Object-Oriented LinkML YAML schema content")
+    return_visual: bool = Field(default=True, description="If True, return visual representation; if False, return internal representation")
+
+class JSONExportRequest(BaseModel):
+    graph_json: Dict[str, Any] = Field(..., description="Internal representation JSON graph with nodes, relationships, and metadata")
 
 
 # Database Connection Function
@@ -3051,3 +3094,527 @@ async def ask(request: Request):
         return JSONResponse(status_code=500, content={"error": "OpenAI API error", "details": str(e)})
     except OpenAIError as e:
         return JSONResponse(status_code=500, content={"error": "OpenAI error", "details": str(e)})
+
+
+# ============================================================================
+# Enum Registry Endpoints
+# ============================================================================
+
+@app.get("/api/enum-registry")
+async def get_enum_registry():
+    """GET /api/enum-registry - Get all enums"""
+    registry = load_json_file('enumRegistry.json')
+    return JSONResponse(content=registry)
+
+
+@app.post("/api/enum-registry")
+async def create_enum(request: EnumCreateRequest, current_user: str = Depends(get_current_user)):
+    """POST /api/enum-registry - Create new enum (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    enum_name = request.name
+    permissible_values = request.permissible_values
+    
+    if not enum_name or not permissible_values:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing name or permissible_values"
+        )
+    
+    registry = load_json_file('enumRegistry.json')
+    
+    # Check if enum already exists
+    if enum_name in registry:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Enum already exists"
+        )
+    
+    # Only allow creating simple enums (with permissible_values)
+    registry[enum_name] = {
+        'permissible_values': permissible_values
+    }
+    
+    save_json_file('enumRegistry.json', registry)
+    return JSONResponse(content=registry[enum_name], status_code=200)
+
+
+@app.put("/api/enum-registry/{enum_name:path}")
+async def update_enum(enum_name: str, request: EnumUpdateRequest, current_user: str = Depends(get_current_user)):
+    """PUT /api/enum-registry/{enum_name} - Update enum (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    registry = load_json_file('enumRegistry.json')
+    
+    if enum_name not in registry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Enum not found"
+        )
+    
+    # Only allow updating simple enums (not complex ones with reachable_from)
+    if 'reachable_from' in registry[enum_name]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot edit complex enums with ontology mappings"
+        )
+    
+    permissible_values = request.permissible_values
+    
+    if not permissible_values:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing permissible_values"
+        )
+    
+    registry[enum_name] = {
+        'permissible_values': permissible_values
+    }
+    
+    save_json_file('enumRegistry.json', registry)
+    return JSONResponse(content=registry[enum_name], status_code=200)
+
+
+@app.delete("/api/enum-registry/{enum_name:path}")
+async def delete_enum(enum_name: str, current_user: str = Depends(get_current_user)):
+    """DELETE /api/enum-registry/{enum_name} - Delete enum (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    registry = load_json_file('enumRegistry.json')
+    
+    if enum_name not in registry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Enum not found"
+        )
+    
+    # Only allow deleting simple enums (not complex ones with reachable_from)
+    if 'reachable_from' in registry[enum_name]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete complex enums with ontology mappings"
+        )
+    
+    del registry[enum_name]
+    save_json_file('enumRegistry.json', registry)
+    return JSONResponse(content={"message": "Enum deleted successfully"}, status_code=200)
+
+
+# ============================================================================
+# Regex Registry Endpoints
+# ============================================================================
+
+@app.get("/api/regex-registry")
+async def get_regex_registry():
+    """GET /api/regex-registry - Get all regexes"""
+    registry = load_json_file('regexRegistry.json')
+    return JSONResponse(content=registry)
+
+
+@app.post("/api/regex-registry")
+async def create_regex(request: RegexCreateRequest, current_user: str = Depends(get_current_user)):
+    """POST /api/regex-registry - Create new regex (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    regex_name = request.name
+    expression = request.expression
+    
+    if not regex_name or not expression:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing name or expression"
+        )
+    
+    # Validate regex
+    try:
+        re.compile(expression)
+    except re.error as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid regex expression: {str(e)}"
+        )
+    
+    registry = load_json_file('regexRegistry.json')
+    
+    # Check if regex already exists
+    if regex_name in registry:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Regex already exists"
+        )
+    
+    registry[regex_name] = {
+        'name': regex_name,
+        'expression': expression
+    }
+    
+    save_json_file('regexRegistry.json', registry)
+    return JSONResponse(content=registry[regex_name], status_code=200)
+
+
+@app.put("/api/regex-registry/{regex_name:path}")
+async def update_regex(regex_name: str, request: RegexUpdateRequest, current_user: str = Depends(get_current_user)):
+    """PUT /api/regex-registry/{regex_name} - Update regex (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    registry = load_json_file('regexRegistry.json')
+    
+    if regex_name not in registry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Regex not found"
+        )
+    
+    expression = request.expression
+    
+    if not expression:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing expression"
+        )
+    
+    # Validate regex
+    try:
+        re.compile(expression)
+    except re.error as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid regex expression: {str(e)}"
+        )
+    
+    registry[regex_name] = {
+        'name': regex_name,
+        'expression': expression
+    }
+    
+    save_json_file('regexRegistry.json', registry)
+    return JSONResponse(content=registry[regex_name], status_code=200)
+
+
+@app.delete("/api/regex-registry/{regex_name:path}")
+async def delete_regex(regex_name: str, current_user: str = Depends(get_current_user)):
+    """DELETE /api/regex-registry/{regex_name} - Delete regex (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    registry = load_json_file('regexRegistry.json')
+    
+    if regex_name not in registry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Regex not found"
+        )
+    
+    del registry[regex_name]
+    save_json_file('regexRegistry.json', registry)
+    return JSONResponse(content={"message": "Regex deleted successfully"}, status_code=200)
+
+
+# ============================================================================
+# Custom Ontologies Registry Endpoints
+# ============================================================================
+
+@app.get("/api/custom-ontologies")
+async def get_custom_ontologies(current_user: str = Depends(get_current_user)):
+    """GET /api/custom-ontologies - Get all custom ontologies (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    ontologies = load_custom_ontologies()  # This is a sync function from service.py
+    return JSONResponse(content={"ontologies": ontologies})
+
+
+@app.post("/api/custom-ontologies")
+async def create_custom_ontology(request: CustomOntologyCreateRequest, current_user: str = Depends(get_current_user)):
+    """POST /api/custom-ontologies - Create new custom ontology (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    ontology_id = request.id.strip() if request.id else ""
+    if not ontology_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing id"
+        )
+    
+    # Validate properties and terms are lists of strings
+    if not isinstance(request.properties, list) or not all(isinstance(p, str) for p in request.properties):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="properties must be a list of strings"
+        )
+    if not isinstance(request.terms, list) or not all(isinstance(t, str) for t in request.terms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="terms must be a list of strings"
+        )
+    
+    # Use atomic load-modify-save to prevent race conditions
+    def add_ontology(ontologies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Check if ontology already exists (case-insensitive check)
+        for o in ontologies:
+            if o.get("id", "").lower() == ontology_id.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Custom ontology with this id already exists"
+                )
+        
+        # Create new ontology entry
+        new_ontology = {
+            "id": ontology_id,
+            "name": request.name.strip() if request.name else "",
+            "description": request.description.strip() if request.description else "",
+            "namespace": request.namespace.strip() if request.namespace else "",
+            "annotator": request.annotator.strip() if request.annotator else "",
+            "properties": request.properties or [],
+            "terms": request.terms or []
+        }
+        
+        ontologies.append(new_ontology)
+        return ontologies
+    
+    ontologies = await load_and_modify_custom_ontologies(add_ontology)
+    new_ontology = next((o for o in ontologies if o.get("id", "").lower() == ontology_id.lower()), None)
+    
+    # Update cache immediately so the new ontology is available
+    if new_ontology:
+        await update_cache_with_custom_ontology(new_ontology, operation="upsert")
+    
+    return JSONResponse(content=new_ontology, status_code=200)
+
+
+@app.put("/api/custom-ontologies/{ontology_id:path}")
+async def update_custom_ontology(ontology_id: str, request: CustomOntologyUpdateRequest, current_user: str = Depends(get_current_user)):
+    """PUT /api/custom-ontologies/{ontology_id} - Update custom ontology (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    # Validate properties and terms are lists of strings
+    if not isinstance(request.properties, list) or not all(isinstance(p, str) for p in request.properties):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="properties must be a list of strings"
+        )
+    if not isinstance(request.terms, list) or not all(isinstance(t, str) for t in request.terms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="terms must be a list of strings"
+        )
+    
+    # Use atomic load-modify-save to prevent race conditions
+    def update_ontology(ontologies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Find ontology by id (case-insensitive)
+        ontology_index = None
+        for i, o in enumerate(ontologies):
+            if o.get("id", "").lower() == ontology_id.lower():
+                ontology_index = i
+                break
+        
+        if ontology_index is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom ontology not found"
+            )
+        
+        # Update ontology
+        ontologies[ontology_index].update({
+            "name": request.name.strip() if request.name else "",
+            "description": request.description.strip() if request.description else "",
+            "namespace": request.namespace.strip() if request.namespace else "",
+            "annotator": request.annotator.strip() if request.annotator else "",
+            "properties": request.properties or [],
+            "terms": request.terms or []
+        })
+        
+        return ontologies
+    
+    ontologies = await load_and_modify_custom_ontologies(update_ontology)
+    updated_ontology = next((o for o in ontologies if o.get("id", "").lower() == ontology_id.lower()), None)
+    
+    # Update cache immediately so the updated ontology is available
+    if updated_ontology:
+        await update_cache_with_custom_ontology(updated_ontology, operation="upsert")
+    
+    return JSONResponse(content=updated_ontology, status_code=200)
+
+
+@app.delete("/api/custom-ontologies/{ontology_id:path}")
+async def delete_custom_ontology(ontology_id: str, current_user: str = Depends(get_current_user)):
+    """DELETE /api/custom-ontologies/{ontology_id} - Delete custom ontology (admin only)"""
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized"
+        )
+    
+    # Use atomic load-modify-save to prevent race conditions
+    deleted_ontology_id = None
+    
+    def delete_ontology(ontologies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        nonlocal deleted_ontology_id
+        # Find ontology by id (case-insensitive)
+        ontology_index = None
+        for i, o in enumerate(ontologies):
+            if o.get("id", "").lower() == ontology_id.lower():
+                ontology_index = i
+                break
+        
+        if ontology_index is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Custom ontology not found"
+            )
+        
+        deleted_ontology = ontologies.pop(ontology_index)
+        deleted_ontology_id = deleted_ontology.get("id")
+        return ontologies
+    
+    await load_and_modify_custom_ontologies(delete_ontology)
+    
+    # Update cache immediately to remove the deleted ontology
+    if deleted_ontology_id:
+        deleted_ontology = {"id": deleted_ontology_id}
+        await update_cache_with_custom_ontology(deleted_ontology, operation="delete")
+    
+    return JSONResponse(content={"message": "Custom ontology deleted successfully", "id": deleted_ontology_id}, status_code=200)
+
+
+# ============================================================================
+# LinkML Translation Endpoint
+# ============================================================================
+
+@app.post("/api/linkml/oo/translate/")
+async def translate_linkml_oo_schema(request: LinkMLOOTranslateRequest):
+    """
+    POST /api/linkml/oo/translate/ - Translate Object-Oriented LinkML YAML schema to visual representation JSON
+    
+    This endpoint takes an Object-Oriented LinkML YAML schema and converts it into a visual representation
+    format with nodes and relationships suitable for diagram visualization.
+    
+    This translator specifically handles OO LinkML patterns where classes have attributes that reference
+    other classes. For other LinkML patterns, use appropriate endpoints.
+    
+    Args:
+        request: LinkMLOOTranslateRequest containing:
+            - yaml_content: Object-Oriented LinkML YAML schema as string
+            - return_visual: If True (default), return visual representation; if False, return internal representation
+    
+    Returns:
+        JSONResponse containing the transformed representation with nodes and relationships
+    """
+    try:
+        # Validate YAML content
+        if not request.yaml_content or not request.yaml_content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="YAML content cannot be empty"
+            )
+        
+        # Translate OO LinkML to visual representation
+        result = translate_linkml_oo(request.yaml_content, return_visual=request.return_visual)
+        print("Translation result:", result)
+        return JSONResponse(content=result, status_code=200)
+    
+    except yaml.YAMLError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid YAML format: {str(e)}"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid OO LinkML schema: {str(e)}"
+        )
+    except Exception as e:
+        logging.error(f"Error translating OO LinkML schema: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+# ============================================================================
+# JSON to YAML Export Endpoint
+# ============================================================================
+
+@app.post("/api/export/json-to-yaml/")
+async def export_json_to_yaml(request: JSONExportRequest):
+    """
+    POST /api/export/json-to-yaml/ - Convert internal representation JSON to LinkML YAML schema
+    
+    This endpoint takes an internal representation JSON graph (with nodes, relationships, and metadata)
+    and converts it into a LinkML YAML schema using the export algorithm.
+    
+    Args:
+        request: JSONExportRequest containing:
+            - graph_json: Internal representation JSON graph with nodes, relationships, and metadata
+    
+    Returns:
+        JSONResponse containing the YAML schema as a string
+    """
+    try:
+        # Validate required fields
+        if "nodes" not in request.graph_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Graph JSON must contain 'nodes' field"
+            )
+        if "relationships" not in request.graph_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Graph JSON must contain 'relationships' field"
+            )
+        
+        # Convert JSON to YAML using the export algorithm (clean implementation)
+        yaml_schema = convert_internal_representation_to_yaml(request.graph_json)
+        
+        # Convert YAML schema dict to YAML string
+        yaml_string = dump_yaml_schema(yaml_schema)
+        
+        return JSONResponse(
+            content={"yaml_content": yaml_string, "yaml_schema": yaml_schema},
+            status_code=200
+        )
+    
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required field in graph JSON: {str(e)}"
+        )
+    except Exception as e:
+        logging.error(f"Error converting JSON to YAML: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )

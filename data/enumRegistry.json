@@ -1,0 +1,223 @@
+{
+  "Gender": {
+    "permissible_values": [
+      "man",
+      "woman"
+    ]
+  },
+  "CHEBIDrugType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:chebi",
+      "source_nodes": [
+        "CHEBI:23888"
+      ],
+      "relationship_types": [
+        "rdfs:subClassOf",
+        "RO:0000087"
+      ]
+    }
+  },
+  "ConditionClinicalStatusType": {
+    "permissible_values": [
+      "active",
+      "recurrence",
+      "relapse",
+      "inactive",
+      "remission",
+      "resolved",
+      "unknown"
+    ]
+  },
+  "ConditionDiagnosisSeverityType": {
+    "permissible_values": [
+      "severe",
+      "moderate",
+      "mild"
+    ]
+  },
+  "DietType": {
+    "permissible_values": [
+      "carnivore",
+      "herbivore",
+      "omnivore",
+      "insectivore",
+      "piscivore"
+    ]
+  },
+  "GOBiologicalProcessType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:go",
+      "source_nodes": [
+        "GO:0008150"
+      ]
+    }
+  },
+  "GOCellComponentType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:go",
+      "source_nodes": [
+        "GO:0005575"
+      ]
+    }
+  },
+  "GOMolecularFunctionType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:go",
+      "source_nodes": [
+        "GO:0003674"
+      ]
+    }
+  },
+  "GeneLocationType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:sqlite:go, sqlite:obo:sqlite:cl",
+      "source_nodes": [
+        "GO:0005575",
+        "CL:0000000"
+      ]
+    }
+  },
+  "MAXOActionType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:maxo",
+      "source_nodes": [
+        "MAXO:0000001"
+      ]
+    }
+  },
+  "MESHTherapeuticType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:mesh",
+      "source_nodes": [
+        "MESH:D013812"
+      ]
+    }
+  },
+  "MeshChemicalIdentifierType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:mesh",
+      "source_nodes": [
+        "MESH:D000602",
+        "MESH:D001685",
+        "MESH:D002241",
+        "MESH:D004364",
+        "MESH:D006571",
+        "MESH:D007287",
+        "MESH:D008055",
+        "MESH:D009706",
+        "MESH:D009930",
+        "MESH:D011083",
+        "MESH:D013812",
+        "MESH:D019602",
+        "MESH:D045424",
+        "MESH:D045762",
+        "MESH:D046911"
+      ]
+    }
+  },
+  "MeshDiseaseIdentifierType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:mesh",
+      "source_nodes": [
+        "MESH:D001423",
+        "MESH:D001523",
+        "MESH:D002318",
+        "MESH:D002943",
+        "MESH:D004066",
+        "MESH:D004700",
+        "MESH:D005128",
+        "MESH:D005261",
+        "MESH:D006425",
+        "MESH:D007154",
+        "MESH:D007280",
+        "MESH:D009057",
+        "MESH:D009140",
+        "MESH:D009358",
+        "MESH:D009369",
+        "MESH:D009422",
+        "MESH:D009750",
+        "MESH:D009784",
+        "MESH:D010038",
+        "MESH:D010272",
+        "MESH:D012140",
+        "MESH:D013568",
+        "MESH:D014777",
+        "MESH:D014947",
+        "MESH:D017437",
+        "MESH:D052801",
+        "MESH:D064419"
+      ]
+    }
+  },
+  "NCITDrugType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:ncit",
+      "source_nodes": [
+        "NCIT:C1908"
+      ]
+    }
+  },
+  "NCITTActivityType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:ncit",
+      "source_nodes": [
+        "NCIT:C43431"
+      ]
+    }
+  },
+  "NCITTreatmentType": {
+    "reachable_from": {
+      "source_ontology": "sqlite:obo:ncit",
+      "source_nodes": [
+        "NCIT:C25218"
+      ]
+    }
+  },
+  "PathologyClassificationOneType": {
+    "permissible_values": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ]
+  },
+  "PathologyClassificationTwoType": {
+    "permissible_values": [
+      "1",
+      "2",
+      "2a",
+      "2b",
+      "2c",
+      "2d",
+      "3",
+      "3a",
+      "3b",
+      "4",
+      "5",
+      "5a",
+      "5b",
+      "5c",
+      "5d",
+      "5e",
+      "5f",
+      "5g",
+      "5h",
+      "5i",
+      "5j"
+    ]
+  },
+  "SeverityLevelType": {
+    "permissible_values": [
+      "mild",
+      "moderate",
+      "severe",
+      "not specified"
+    ]
+  },
+  "ConsStatus": {
+    "permissible_values": [
+      "Lower Risk"
+    ]
+  }
+}

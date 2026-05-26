@@ -13,3 +13,5 @@ apscheduler
 chroma
 chromadb
 Levenshtein
+numpy
+pyyaml
