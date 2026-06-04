@@ -35,6 +35,7 @@ import chromadb
 import re
 import openai
 import json
+import httpx
 import Levenshtein
 from registry_utils import load_json_file, save_json_file, is_admin, save_custom_ontologies, load_and_modify_custom_ontologies, update_cache_with_custom_ontology
 from ontologies.service import load_custom_ontologies
@@ -111,6 +112,19 @@ class UserSubscribesPolicyRequest(BaseModel):
 class UserMadeOperationInput(BaseModel):
     username: str
     operationName: str
+
+class UserMadeExtractionInput(BaseModel):
+    username: str
+    count: int = 1
+
+# Extraction quota per plan (separate from intelligent requests)
+EXTRACTION_LIMITS = {
+    "trial":    25,
+    "silver":   100,
+    "gold":     250,
+    "platinum": None,  # unlimited
+    "admin":    None,
+}
 
 class UserUpdateRequest(BaseModel):
     username: str
@@ -654,6 +668,167 @@ async def log_user_operation(operation: UserMadeOperationInput, db: db_dependenc
         return JSONResponse(status_code=500, content={"message": "Internal server error"})
 
 
+# ── Extraction quota endpoints ────────────────────────────────────────────────
+
+class CanExtractRequest(BaseModel):
+    username: str
+    count: int = 1  # number of LLM calls about to be made
+
+
+@app.post("/api/canExtract/")
+async def can_extract(request_data: CanExtractRequest, db: db_dependency):
+    username = request_data.username
+
+    if not username:
+        return JSONResponse(content={"allowed": False, "reason": "You must register to use extractions."})
+
+    if username == "schemalink":
+        return JSONResponse(content={"allowed": True})
+
+    now = datetime.now(local_tz)
+
+    policy_subscription = db.execute(
+        text("""
+        SELECT startDate, policyName
+        FROM UserSubscribesPolicy
+        WHERE username = :username
+        AND startDate <= :now
+        AND endDate >= :now
+        AND status = 'active'
+        ORDER BY startDate DESC
+        LIMIT 1
+        """),
+        {"username": username, "now": now}
+    ).fetchone()
+
+    if not policy_subscription:
+        return JSONResponse(content={"allowed": False, "reason": "No active subscription policy."})
+
+    start_date = policy_subscription[0]
+    policy_name = policy_subscription[1].lower()
+    max_extractions = EXTRACTION_LIMITS.get(policy_name)
+
+    if max_extractions is None:
+        return JSONResponse(content={"allowed": True, "policy": policy_name})
+
+    extraction_count = db.query(models.UserMadeExtraction).filter(
+        models.UserMadeExtraction.username == username,
+        models.UserMadeExtraction.date >= start_date,
+    ).count()
+
+    remaining = max_extractions - extraction_count
+    if remaining <= 0:
+        return JSONResponse(content={"allowed": False, "reason": f"You have reached the maximum number of API calls ({max_extractions}) for your plan."})
+
+    if request_data.count > remaining:
+        return JSONResponse(content={"allowed": False, "reason": f"This extraction requires {request_data.count} API calls but you only have {remaining} remaining on your plan."})
+
+    return JSONResponse(content={"allowed": True, "policy": policy_name, "remaining": remaining})
+
+
+@app.post("/api/extract-operation/")
+async def log_extraction(operation: UserMadeExtractionInput, db: db_dependency):
+    try:
+        now = datetime.now(local_tz)
+        for i in range(max(1, operation.count)):
+            db_extraction = models.UserMadeExtraction(
+                username=operation.username,
+                date=now + timedelta(microseconds=i),
+            )
+            db.add(db_extraction)
+        db.commit()
+        return {"message": f"{operation.count} extraction call(s) logged."}
+    except Exception as e:
+        print(f"Error logging extraction: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+class ExtractRequest(BaseModel):
+    username: str
+    schema: str
+    text: str
+    add_dependencies: bool = True
+    ground_mode: str = "exact"
+
+
+@app.post("/api/extract/")
+async def extract(request: ExtractRequest, db: db_dependency):
+    username = request.username
+
+    if not username:
+        return JSONResponse(status_code=401, content={"error": "You must be logged in to use extractions."})
+
+    # Quota check (reuse canExtract logic inline)
+    if username != "schemalink":
+        now = datetime.now(local_tz)
+        policy_subscription = db.execute(
+            text("""
+            SELECT startDate, policyName
+            FROM UserSubscribesPolicy
+            WHERE username = :username
+            AND startDate <= :now
+            AND endDate >= :now
+            AND status = 'active'
+            ORDER BY startDate DESC
+            LIMIT 1
+            """),
+            {"username": username, "now": now}
+        ).fetchone()
+
+        if not policy_subscription:
+            return JSONResponse(status_code=403, content={"error": "No active subscription policy."})
+
+        start_date = policy_subscription[0]
+        policy_name = policy_subscription[1].lower()
+        max_extractions = EXTRACTION_LIMITS.get(policy_name)
+
+        if max_extractions is not None:
+            extraction_count = db.query(models.UserMadeExtraction).filter(
+                models.UserMadeExtraction.username == username,
+                models.UserMadeExtraction.date >= start_date,
+            ).count()
+
+            if extraction_count >= max_extractions:
+                return JSONResponse(status_code=403, content={"error": f"You have reached the maximum number of API calls ({max_extractions}) for your plan."})
+
+    # Forward to the SchemaLink engine
+    engine_url = os.getenv("SCHEMALINK_ENGINE_URL")
+    if not engine_url:
+        return JSONResponse(status_code=500, content={"error": "Engine URL not configured."})
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            engine_resp = await client.post(engine_url, json={
+                "schema": request.schema,
+                "text": request.text,
+                "add_dependencies": request.add_dependencies,
+                "ground_mode": request.ground_mode,
+            })
+        data = engine_resp.json()
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": f"Engine unreachable: {str(e)}"})
+
+    if engine_resp.status_code != 200 or data.get("error"):
+        return JSONResponse(status_code=engine_resp.status_code, content=data)
+
+    # Log actual API calls used (one per processed class)
+    processed_classes = set(list(data.get("responses", {}).keys()) + list(data.get("trace", {}).keys()))
+    api_call_count = max(1, len(processed_classes))
+
+    now = datetime.now(local_tz)
+    try:
+        for i in range(api_call_count):
+            db.add(models.UserMadeExtraction(
+                username=username,
+                date=now + timedelta(microseconds=i),
+            ))
+        db.commit()
+    except Exception as e:
+        print(f"Warning: could not log extractions: {e}")
+
+    return JSONResponse(content=data)
+
+
 # User subscribes to a policy
 @app.post("/api/subscribe-policy/")
 async def subscribe_policy( data: UserSubscribesPolicyRequest, db: db_dependency):
@@ -772,6 +947,14 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
         models.UserMadeOperation.date <= subscription.endDate
     ).count()
 
+    extractions_done = db.query(models.UserMadeExtraction).filter(
+        models.UserMadeExtraction.username == username,
+        models.UserMadeExtraction.date >= subscription.startDate,
+        models.UserMadeExtraction.date <= subscription.endDate
+    ).count()
+
+    max_extractions = EXTRACTION_LIMITS.get(policy.name.lower())
+
     now = datetime.now(local_tz)
     subscription_end = subscription.endDate.astimezone(local_tz)
     delta = subscription_end - now
@@ -785,6 +968,8 @@ async def get_user_subscription_details(request: UsernameRequest, db: db_depende
         "policyName": policy.name,
         "operationsDone": operations_done,
         "maxAccess": subscription.numOperations,
+        "extractionsDone": extractions_done,
+        "maxExtractions": max_extractions,
         "hoursRemaining": remaining_time_str,
     }
 

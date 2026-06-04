@@ -91,6 +91,15 @@ class UserMadeOperation(Base):
     user = relationship("User", back_populates="operations")
     operation = relationship("Operation", back_populates="user_operations")
 
+class UserMadeExtraction(Base):
+    __tablename__ = "usermadeextraction"
+
+    username = Column(String(50), ForeignKey("users.username", ondelete="CASCADE"), primary_key=True)
+    date = Column(DateTime(timezone=True), primary_key=True)
+
+    user = relationship("User", backref="extractions")
+
+
 class OperationIsCategory(Base):
     __tablename__ = "operationiscategory"
     

@@ -494,3 +494,13 @@ VALUES (
   NULL, 
   'admin'
 );
+
+-- Extraction tracking table (separate from intelligent requests)
+CREATE TABLE IF NOT EXISTS public.usermadeextraction (
+    username character varying(50) NOT NULL,
+    date timestamp with time zone NOT NULL,
+    CONSTRAINT usermadeextraction_pkey PRIMARY KEY (username, date),
+    CONSTRAINT usermadeextraction_username_fkey FOREIGN KEY (username) REFERENCES public.users(username) ON DELETE CASCADE
+);
+
+ALTER TABLE public.usermadeextraction OWNER TO postgres;
