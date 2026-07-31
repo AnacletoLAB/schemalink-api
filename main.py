@@ -1,7 +1,7 @@
 import yaml
 from fastapi import FastAPI, Request, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from linkml.generators.pydanticgen import PydanticGenerator
 from linkml.linter.linter import Linter
@@ -749,6 +749,7 @@ class ExtractRequest(BaseModel):
     text: str
     add_dependencies: bool = True
     ground_mode: str = "exact"
+    model: str = "gpt-4o-mini"
 
 
 @app.post("/api/extract/")
@@ -803,6 +804,7 @@ async def extract(request: ExtractRequest, db: db_dependency):
                 "text": request.text,
                 "add_dependencies": request.add_dependencies,
                 "ground_mode": request.ground_mode,
+                "model": request.model,
             })
         data = engine_resp.json()
     except Exception as e:
@@ -827,6 +829,108 @@ async def extract(request: ExtractRequest, db: db_dependency):
         print(f"Warning: could not log extractions: {e}")
 
     return JSONResponse(content=data)
+
+
+class ExtractStreamRequest(BaseModel):
+    username: str
+    schema: str
+    text: str
+    add_dependencies: bool = True
+    add_guidelines: bool = True
+    ground_mode: str = "exact"
+    model: str = "gpt-4o-mini"
+
+
+@app.post("/api/extract/stream/")
+async def extract_stream(request: ExtractStreamRequest, db: db_dependency):
+    """Proxy SSE streaming extraction to the SchemaLink engine v2 endpoint."""
+    username = request.username
+
+    if not username:
+        return JSONResponse(status_code=401, content={"error": "You must be logged in to use extractions."})
+
+    # Quota check
+    if username != "schemalink":
+        now = datetime.now(local_tz)
+        policy_subscription = db.execute(
+            text("""
+            SELECT startDate, policyName
+            FROM UserSubscribesPolicy
+            WHERE username = :username
+            AND startDate <= :now
+            AND endDate >= :now
+            AND status = 'active'
+            ORDER BY startDate DESC
+            LIMIT 1
+            """),
+            {"username": username, "now": now}
+        ).fetchone()
+
+        if not policy_subscription:
+            return JSONResponse(status_code=403, content={"error": "No active subscription policy."})
+
+        start_date = policy_subscription[0]
+        policy_name = policy_subscription[1].lower()
+        max_extractions = EXTRACTION_LIMITS.get(policy_name)
+
+        if max_extractions is not None:
+            extraction_count = db.query(models.UserMadeExtraction).filter(
+                models.UserMadeExtraction.username == username,
+                models.UserMadeExtraction.date >= start_date,
+            ).count()
+            if extraction_count >= max_extractions:
+                return JSONResponse(status_code=403, content={"error": f"You have reached the maximum number of API calls ({max_extractions}) for your plan."})
+
+    engine_url = os.getenv("SCHEMALINK_ENGINE_URL", "").replace("/v1/extract", "/v2/extract")
+    if not engine_url:
+        return JSONResponse(status_code=500, content={"error": "Engine URL not configured."})
+
+    logged = False
+
+    async def stream_from_engine():
+        nonlocal logged
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                async with client.stream("POST", engine_url, json={
+                    "schema": request.schema,
+                    "text": request.text,
+                    "add_dependencies": request.add_dependencies,
+                    "add_guidelines": request.add_guidelines,
+                    "ground_mode": request.ground_mode,
+                    "model": request.model,
+                }) as resp:
+                    async for chunk in resp.aiter_text():
+                        yield chunk
+                        # When we receive the "done" event, log extractions
+                        if "\"type\": \"done\"" in chunk and not logged:
+                            try:
+                                for raw_line in chunk.split('\n'):
+                                    if not raw_line.startswith('data:'):
+                                        continue
+                                    payload = json.loads(raw_line[5:].strip())
+                                    if payload.get("type") == "done":
+                                        trace = payload.get("trace", {})
+                                        responses = payload.get("responses", {})
+                                        processed = set(list(trace.keys()) + list(responses.keys()))
+                                        count = max(1, len(processed))
+                                        now = datetime.now(local_tz)
+                                        for i in range(count):
+                                            db.add(models.UserMadeExtraction(
+                                                username=username,
+                                                date=now + timedelta(microseconds=i),
+                                            ))
+                                        db.commit()
+                                        logged = True
+                            except Exception:
+                                pass
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        stream_from_engine(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # User subscribes to a policy
