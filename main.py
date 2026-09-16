@@ -42,6 +42,8 @@ from ontologies.service import load_custom_ontologies
 #from linkml_translator_aldyiar import translate_linkml_oo
 from linkml_translator import translate_linkml_oo
 from export_algorithm import convert_internal_representation_to_yaml, dump_yaml_schema
+from pgschema_translator import translate_pgschema
+from pgschema_export import convert_internal_representation_to_pgschema_dict, dump_pgschema
 
 local_tz = pytz.timezone("Europe/Rome")
 
@@ -175,6 +177,12 @@ class LinkMLOOTranslateRequest(BaseModel):
     return_visual: bool = Field(default=True, description="If True, return visual representation; if False, return internal representation")
 
 class JSONExportRequest(BaseModel):
+    graph_json: Dict[str, Any] = Field(..., description="Internal representation JSON graph with nodes, relationships, and metadata")
+
+class PGSchemaTranslateRequest(BaseModel):
+    pgschema_content: str = Field(..., description="PG-Schema text content")
+
+class PGSchemaExportRequest(BaseModel):
     graph_json: Dict[str, Any] = Field(..., description="Internal representation JSON graph with nodes, relationships, and metadata")
 
 
@@ -3996,6 +4004,100 @@ async def export_json_to_yaml(request: JSONExportRequest):
         )
     except Exception as e:
         logging.error(f"Error converting JSON to YAML: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+# ============================================================================
+# PG-Schema Translation Endpoint
+# ============================================================================
+
+@app.post("/api/pgschema/translate/")
+async def translate_pgschema_schema(request: PGSchemaTranslateRequest):
+    """
+    POST /api/pgschema/translate/ - Translate PG-Schema text to visual representation JSON
+
+    This endpoint takes a PG-Schema text schema and converts it into a visual representation
+    format with nodes and relationships suitable for diagram visualization.
+
+    Args:
+        request: PGSchemaTranslateRequest containing:
+            - pgschema_content: PG-Schema text content
+
+    Returns:
+        JSONResponse containing the transformed representation with nodes and relationships
+    """
+    try:
+        if not request.pgschema_content or not request.pgschema_content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PG-Schema content cannot be empty"
+            )
+
+        result = translate_pgschema(request.pgschema_content)
+        return JSONResponse(content=result, status_code=200)
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid PG-Schema: {str(e)}"
+        )
+    except Exception as e:
+        logging.error(f"Error translating PG-Schema: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+# ============================================================================
+# JSON to PG-Schema Export Endpoint
+# ============================================================================
+
+@app.post("/api/export/json-to-pgschema/")
+async def export_json_to_pgschema(request: PGSchemaExportRequest):
+    """
+    POST /api/export/json-to-pgschema/ - Convert internal representation JSON to PG-Schema text
+
+    This endpoint takes an internal representation JSON graph (with nodes, relationships, and metadata)
+    and converts it into PG-Schema text using the export algorithm.
+
+    Args:
+        request: PGSchemaExportRequest containing:
+            - graph_json: Internal representation JSON graph with nodes, relationships, and metadata
+
+    Returns:
+        JSONResponse containing the PG-Schema text as a string
+    """
+    try:
+        if "nodes" not in request.graph_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Graph JSON must contain 'nodes' field"
+            )
+        if "relationships" not in request.graph_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Graph JSON must contain 'relationships' field"
+            )
+
+        pgschema_dict = convert_internal_representation_to_pgschema_dict(request.graph_json)
+        pgschema_content = dump_pgschema(pgschema_dict)
+
+        return JSONResponse(
+            content={"pgschema_content": pgschema_content},
+            status_code=200
+        )
+
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required field in graph JSON: {str(e)}"
+        )
+    except Exception as e:
+        logging.error(f"Error converting JSON to PG-Schema: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
