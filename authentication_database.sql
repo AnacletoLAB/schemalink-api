@@ -504,3 +504,12 @@ CREATE TABLE IF NOT EXISTS public.usermadeextraction (
 );
 
 ALTER TABLE public.usermadeextraction OWNER TO postgres;
+
+-- v2: add rich history columns (safe to run multiple times)
+ALTER TABLE public.usermadeextraction
+    ADD COLUMN IF NOT EXISTS title character varying(300),
+    ADD COLUMN IF NOT EXISTS schema_yaml text,
+    ADD COLUMN IF NOT EXISTS input_text text,
+    ADD COLUMN IF NOT EXISTS result_json text,
+    ADD COLUMN IF NOT EXISTS call_count integer,
+    ADD COLUMN IF NOT EXISTS extraction_status character varying(16) DEFAULT 'success';

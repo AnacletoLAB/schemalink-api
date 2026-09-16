@@ -97,6 +97,14 @@ class UserMadeExtraction(Base):
     username = Column(String(50), ForeignKey("users.username", ondelete="CASCADE"), primary_key=True)
     date = Column(DateTime(timezone=True), primary_key=True)
 
+    # Rich extraction history fields (added in v2)
+    title = Column(String(300), nullable=True)
+    schema_yaml = Column(String, nullable=True)
+    input_text = Column(String, nullable=True)
+    result_json = Column(String, nullable=True)   # JSON string
+    call_count = Column(Integer, nullable=True)
+    extraction_status = Column(String(16), nullable=True, default="success")
+
     user = relationship("User", backref="extractions")
 
 

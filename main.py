@@ -743,6 +743,99 @@ async def log_extraction(operation: UserMadeExtractionInput, db: db_dependency):
         return JSONResponse(status_code=500, content={"message": "Internal server error"})
 
 
+# ── Extraction History ──────────────────────────────────────────────────────
+
+class SaveExtractionRequest(BaseModel):
+    username: str
+    title: Optional[str] = None
+    schema_yaml: Optional[str] = None
+    input_text: Optional[str] = None
+    result_json: Optional[str] = None   # JSON string
+    call_count: Optional[int] = None
+    extraction_status: Optional[str] = "success"
+
+@app.post("/api/extractions/save/")
+async def save_extraction(request: SaveExtractionRequest, db: db_dependency):
+    """Save a rich extraction record (schema + text + result) for history."""
+    try:
+        now = datetime.now(local_tz)
+        record = models.UserMadeExtraction(
+            username=request.username,
+            date=now,
+            title=request.title,
+            schema_yaml=request.schema_yaml,
+            input_text=request.input_text,
+            result_json=request.result_json,
+            call_count=request.call_count,
+            extraction_status=request.extraction_status or "success",
+        )
+        db.add(record)
+        db.commit()
+        return {"message": "Extraction saved.", "date": now.isoformat()}
+    except Exception as e:
+        print(f"Error saving extraction history: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+class ExtractionHistoryRequest(BaseModel):
+    username: str
+
+@app.post("/api/extractions/")
+async def get_extractions(request: ExtractionHistoryRequest, db: db_dependency):
+    """Return the extraction history for the given user (most recent first)."""
+    try:
+        rows = (
+            db.query(models.UserMadeExtraction)
+            .filter(models.UserMadeExtraction.username == request.username)
+            .order_by(models.UserMadeExtraction.date.desc())
+            .limit(100)
+            .all()
+        )
+        result = []
+        for r in rows:
+            result.append({
+                "date": r.date.isoformat() if r.date else None,
+                "title": r.title,
+                "schema_yaml": r.schema_yaml,
+                "input_text": r.input_text,
+                "result_json": r.result_json,
+                "call_count": r.call_count,
+                "extraction_status": r.extraction_status,
+            })
+        return result
+    except Exception as e:
+        print(f"Error fetching extraction history: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+
+class DeleteExtractionRequest(BaseModel):
+    username: str
+    date: str   # ISO string
+
+@app.post("/api/extractions/delete/")
+async def delete_extraction(request: DeleteExtractionRequest, db: db_dependency):
+    """Delete a single extraction record by username + date."""
+    try:
+        from datetime import datetime as _dt
+        dt = _dt.fromisoformat(request.date)
+        deleted = (
+            db.query(models.UserMadeExtraction)
+            .filter(
+                models.UserMadeExtraction.username == request.username,
+                models.UserMadeExtraction.date == dt,
+            )
+            .delete()
+        )
+        db.commit()
+        if deleted:
+            return {"message": "Deleted."}
+        return JSONResponse(status_code=404, content={"message": "Record not found."})
+    except Exception as e:
+        print(f"Error deleting extraction: {e}")
+        return JSONResponse(status_code=500, content={"message": "Internal server error"})
+
+# ── Extract ────────────────────────────────────────────────────────────────
+
 class ExtractRequest(BaseModel):
     username: str
     schema: str
